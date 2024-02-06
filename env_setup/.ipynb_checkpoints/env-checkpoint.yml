@@ -1,0 +1,16 @@
+name: scLEMBAS
+channels:
+  - conda-forge
+  - https://ftp.osuosl.org/pub/open-ce/current # most recent channel for cuda+pytorch on ppc64le (Satori)
+dependencies:    
+    - conda-forge::scanpy
+    - pytorch
+
+
+
+# replace pytorch with this on OS other than ppc64le
+    # - nvidia::cuda-toolkit
+    # - pytorch::pytorch-cuda=11.8#11.6
+    # - pytorch::torchvision
+    # - pytorch::torchaudio
+    # - pytorch::pytorch=*=*cuda*
