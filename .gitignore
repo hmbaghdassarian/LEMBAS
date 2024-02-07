@@ -2,4 +2,5 @@
 **/*.h5ad
 **/*.ipynb_checkpoints
 **/*.ipynb_checkpoints/
+**/*.slurm
 **/__pycache__/
