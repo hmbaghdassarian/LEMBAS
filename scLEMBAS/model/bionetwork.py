@@ -1,4 +1,5 @@
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Annotated
+from annotated_types import Ge
 
 import pandas as pd
 import numpy as np 
@@ -51,9 +52,9 @@ def format_network(net: pd.DataFrame,
     return formatted_net
 
 class ProjectInput(nn.Module):
-    """Creates the signaling pathway network representation and sets up weights to learn for the inputs."""
-    def __init__(self, node_idx_map: Dict[str, int], input_labels: np.array, projection_amplitude: Union[int, float], dtype: torch.dtype=torch.float32):
-        """Initialization method for ProjectInput
+    """Generate all nodes for the signaling network and linearly scale input ligand values by learned parameters."""
+    def __init__(self, node_idx_map: Dict[str, int], input_labels: np.array, projection_amplitude: Union[int, float] = 1, dtype: torch.dtype=torch.float32):
+        """Initialization method.
 
         Parameters
         ----------
@@ -63,7 +64,8 @@ class ProjectInput(nn.Module):
         input_labels : np.array
             names of the input nodes (ligands) from net
         projection_amplitude : Union[int, float]
-            value with which to initialize projection layer weights
+            value with which to initialize learned linear scaling parameters, by default 1. (if turn require_grad = False for this layer, this is still applied 
+            simply as a constant linear scalar in each forward pass)
         dtype : torch.dtype, optional
             datatype to store values in torch, by default torch.float32
         """
@@ -81,19 +83,172 @@ class ProjectInput(nn.Module):
         X_full[:, self.input_node_order] = self.weights * X_in # only modify those nodes that are part of the input (ligands)
         return X_full
     
-    def L2Reg(self, L2):
-        """Apply an L2 regularization to the neural network parameters"""
-        projection_L2 = L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
-        return projection_L2    
+    def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
+        """Get the L2 regularization term for the neural network parameters.
+        Here, this pushes learned parameters towards `projection_amplitude` 
+        
+        Parameters
+        ----------
+        lambda_2 : Annotated[float, Ge(0)]
+            the regularization parameter, by default 0 (no penalty) 
+        
+        Returns
+        -------
+        projection_L2 : torch.Tensor
+            the regularization term
+        """
+        # if removed the `- self.projection_amplitude `part, would force weights to 0, thus shrinking ligand inputs
+        projection_L2 = lambda_L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
+        return projection_L2
     
     def set_device(self, device):
         self.input_node_order = self.input_node_order.to(device)
 
+class BioNet(nn.Module):
+    def __init__(self, edge_list: np.array, 
+                 edge_weights: np.array, 
+                 network_size: int, 
+                 bionet_params: Dict[str, float], 
+                 activation_function: str = 'MML', 
+                 dtype: torch.dtype=torch.float32):
+        """Initialization method.
+
+        Parameters
+        ----------
+        edge_list : np.array
+            a (2, net.shape[0]) array where the first row represents the indices for the target node and the 
+            second row represents the indices for the source node. net.shape[0] is the total # of interactions
+            output from  `SignalingModel.parse_network` 
+        edge_weights : np.array
+            a (1, net.shape[0]) array where the first row is a boolean of whether the interactions are stimulating and the 
+            second row is a boolean of whether the interactions are inhibiting
+            output from  `SignalingModel.parse_network`
+        network_size : int
+            the number of nodes in the network
+        bionet_params : Dict[str, float]
+            training parameters for the model
+            see `SignalingModel.set_training_parameters`
+        activation_function : str, optional
+            _description_, by default 'MML'
+        dtype : torch.dtype, optional
+           datatype to store values in torch, by default torch.float32
+        """
+        super().__init__()
+        self.training_params = bionet_params
+
+        self.network_size_in = network_size
+        self.network_size_out = network_size
+        self.edge_list = (torch.tensor(edge_list[0, :]), torch.tensor(edge_list[1, :]))
+        self.edge_weights = torch.tensor(edge_weights)
+        self.type = dtype
+        #H0 = 0.5 * torch.rand((network_size, 1), dtype=dtype)
+        #H0 = torch.zeros((network_size, 1), dtype=dtype)
+
+        # initialize weights and biases
+        weightValues, bias = self.initializeWeights()
+        self.mask = self.makeMask(self.edge_list, network_size)
+        weights = torch.zeros(self.mask.shape, dtype = dtype)
+        weights[self.edge_list] = weightValues
+        
+        self.edge_weightsValues, self.edge_weightsMask = self.makeMOAMask()
+
+        self.weights = nn.Parameter(weights)
+        self.bias = nn.Parameter(bias)
+        #self.H0 = nn.Parameter(H0)
+             
+        #self.step = forwardNetworkGPU.FFnet(edge_list, network_size, network_size)
+        
+        if activation_function == 'MML':
+            self.activation = activationFunctions.MMLactivation
+            self.delta = activationFunctions.MMLDeltaActivation
+            self.oneStepDeltaActivationFactor = activationFunctions.MMLoneStepDeltaActivationFactor
+        elif activation_function == 'leakyRelu':
+            self.activation = activationFunctions.leakyReLUActivation
+            self.delta = activationFunctions.leakyReLUDeltaActivation
+            self.oneStepDeltaActivationFactor = activationFunctions.leakyReLUoneStepDeltaActivationFactor     
+        elif activation_function == 'sigmoid':
+            self.activation = activationFunctions.sigmoidActivation
+            self.delta = activationFunctions.sigmoidDeltaActivation
+            self.oneStepDeltaActivationFactor = activationFunctions.sigmoidOneStepDeltaActivationFactor
+        else:
+            print('No activation function!')
+            
+    def makeMOAMask(self):
+        MOAsigned = self.edge_weights[0, :].type(torch.long) - self.edge_weights[1, :].type(torch.long) #1=activation -1=inhibition, 0=unknown
+        weights = torch.zeros(self.network_size_out, self.network_size_in, dtype=torch.long)
+        weights[self.edge_list] = MOAsigned
+        MOAmask = weights == 0
+        return weights, MOAmask
+
+    def makeMask(self, edge_list, network_size):
+        weights = torch.zeros(network_size, network_size, dtype=bool)
+        weights[self.edge_list] = True
+        weights = torch.logical_not(weights)
+        return weights
+
+    def setDevice(self, device):
+        #self.A = self.A.to(device)
+        self.edge_weights = self.edge_weights.to(device)
+        self.mask = self.mask.to(device)
+        self.edge_weightsValues = self.edge_weightsValues.to(device)
+        self.edge_weightsMask = self.edge_weightsMask.to(device)
+        #self.step.setDevice(device)
+        #self.edge_list[0] = self.edge_list[0].to(device)
+        #self.edge_list[1] = self.edge_list[1].to(device)
+        
+    def forward(self, x):
+        self.applySparsity()
+        tol = self.training_params['tolerance']
+        iterations = self.training_params['maxSteps']
+        
+        condition = torch.tensor(True, device=x.device)
+        transposedX = x.T
+        transposedX = transposedX + self.bias
+        new = torch.zeros_like(transposedX)
+        
+        #allSteps = []
+        for i in range(iterations):
+            old = new
+            new = torch.mm(self.weights, new) #self.step(tmp)
+            new = new + transposedX         
+            new = self.activation(new, self.training_params['leak']) #self.step(tmp)
+            
+            if (i % 10 == 0) and (i > 20):
+                diff = torch.max(torch.abs(new - old))    
+                #diff = torch.max(torch.abs(new - allSteps[i-1]))          
+                passTolerance = diff.lt(tol)
+                if passTolerance == condition:
+                    #allSteps.extend([new.unsqueeze(0)] * (iterations-i))
+                    break
+            #allSteps.append(new.unsqueeze(0))
+        #allSteps = torch.cat(allSteps, axis=0)
+        #allSteps = allSteps.permute([0, 2, 1])
+        steadyState = new.T
+        return steadyState #, allSteps
+        #return bionetworkFunction.apply(x, self.weights, self.bias, self.A, self.edge_list, self.training_params, self.activation, self.delta)
+
+
+    def L2Reg(self, L2):
+        #L2 = torch.tensor(L2, dtype = self.weights.dtype, device = self.weights.device)
+        biasLoss = L2 * torch.sum(torch.square(self.bias))
+        weightLoss = L2 * torch.sum(torch.square(self.weights))     
+        #biasLoss = 0.1 * torch.sum(torch.abs(self.bias))
+        #weightLoss = 0.1 * torch.sum(torch.abs(self.weights))
+        return L2 * (biasLoss + weightLoss)
+
+    def getWeight(self, nodeNames, source, target):
+        self.A.data = self.weights.detach().numpy()
+        locationSource = numpy.argwhere(numpy.isin(nodeNames, source))[0]
+        locationTarget = numpy.argwhere(numpy.isin(nodeNames, target))[0]
+        weight = self.A[locationTarget, locationSource][0]
+        return weight
+
 class SignalingModel(torch.nn.Module):
+    """Constructs the signaling network based RNN."""
     DEFAULT_TRAINING_PARAMETERS = {'targetSteps': 100, 'maxSteps': 300, 'expFactor': 20, 'leak': 0.01, 'tolerance': 1e-5}
     
     def __init__(self, net: pd.DataFrame, X_in: pd.DataFrame, y_out: pd.DataFrame,
-                 projection_amplitude: Union[int, float], projection_factor: float,
+                 projection_amplitude: Union[int, float] = 1, projection_factor: float,
                  ban_list: List[str] = None, weight_label: str = 'mode_of_action', 
                  source_label: str = 'source', target_label: str = 'target', 
                 bionet_params: Dict[str, float] = None , 
@@ -114,7 +269,7 @@ class SignalingModel(torch.nn.Module):
         ban_list : List[str], optional
             a list of signaling network nodes to disregard, by default None
         projection_amplitude : Union[int, float]
-            value with which to initialize projection layer weights, passed to `ProjectInput`
+            value with which to scale ligand inputs by, by default 1 (see `ProjectInput` for details, can also be tuned as a learned parameter in the model)
         projection_factor : float
             _description_
         bionet_params : Dict[str, float], optional
@@ -126,8 +281,6 @@ class SignalingModel(torch.nn.Module):
         device : str
             whether to use gpu ("cuda") or cpu ("cpu"), by default "cpu"
         """
-
-        
         super().__init__()
         self.dtype = dtype
         self.device = device
@@ -146,6 +299,8 @@ class SignalingModel(torch.nn.Module):
 
         # define model layers 
         self.input_layer = ProjectInput(self.node_idx_map, self.input_labels, projection_amplitude, self.dtype)
+        self.signaling_network = BioNet(edge_list, edge_weights, size = len(node_labels), bionet_params = bionet_params, 
+                                        activation_function = activation_function, dtype = self.dtype)
 
     def parse_network(self, net: pd.DataFrame, ban_list: List[str] = None, 
                  weight_label: str = 'mode_of_action', source_label: str = 'source', target_label: str = 'target'):
@@ -155,7 +310,8 @@ class SignalingModel(torch.nn.Module):
         ----------
         net: pd.DataFrame
             signaling network adjacency list with the following columns:
-                - `weight_label`: whether the interaction is stimulating (1) or inhibiting (-1) or unknown (0). Exclude non-interacting (0) nodes. 
+                - `weight_label`: whether the interaction is stimulating (1) or inhibiting (-1) or unknown (0). Exclude non-interacting (0)
+                nodes. 
                 - `source_label`: source node column name
                 - `target_label`: target node column name
         ban_list : List[str], optional
