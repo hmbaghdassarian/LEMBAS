@@ -1,6 +1,5 @@
 """
 Utility functions for single-cell AnnData objects.
-Functions to process single-cell AnnData objects.
 """
 import pandas as pd
 import numpy as np

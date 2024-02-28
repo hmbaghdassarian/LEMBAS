@@ -3,4 +3,6 @@
 **/*.ipynb_checkpoints
 **/*.ipynb_checkpoints/
 **/*.slurm
+**/*.npz
+**/*.pth
 **/__pycache__/
