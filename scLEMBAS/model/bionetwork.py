@@ -106,7 +106,7 @@ class ProjectInput(nn.Module):
         projection_L2 : torch.Tensor
             the regularization term
         """
-        # if removed the `- self.projection_amplitude `part, would force weights to 0, thus shrinking ligand inputs
+        # if removed the `- self.projection_amplitude` part, would force weights to 0, thus shrinking ligand inputs
         projection_L2 = lambda_L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
         return projection_L2
     
@@ -275,7 +275,26 @@ class SignalingModel(torch.nn.Module):
         return params
 
     def forward(self, X_in):
-        X_full = self.inputLayer(X_in) # input ligand weights
-    #     fullY = self.network(X_full)
-    #     Yhat = self.projectionLayer(fullY)
+        X_full = self.input_layer(X_in) # input ligand weights
+        Y_full = self.signaling_network(X_full) # RNN of full signaling network
+    #     Yhat = self.projectionLayer(Y_full)
     #     return Yhat, fullY
+
+    def L2_reg(self, lambda_L2):
+        """Get the L2 regularization term for the neural network parameters.
+        
+        Parameters
+        ----------
+        lambda_2 : Annotated[float, Ge(0)]
+            the regularization parameter, by default 0 (no penalty) 
+        
+        Returns
+        -------
+        tot_L2 : torch.Tensor
+            the regularization term (as the sum of the regularization terms for each parameter)
+        """
+        inputL2 = self.input_layer.L2_reg(lambda_L2)
+        signalingL2 = self.signaling_network.L2_reg(lambda_L2)
+        # projectionL2 = self.projectionLayer.L2Reg(L2)
+        tot_L2 = inputL2 + signalingL2# + projectionL2
+        return tot_L2

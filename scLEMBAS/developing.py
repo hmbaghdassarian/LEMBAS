@@ -1,5 +1,5 @@
 from torch import nn
-from typing import Dict
+from typing import Dict, Annotated
 
 import sys
 sys.path.insert(1, "/home/hmbaghda/Projects/scLEMBAS/")
@@ -134,7 +134,7 @@ class BioNet(nn.Module):
             to -1, and interactions that do not exist or have an unknown mechanism of action (stimulating/inhibiting) set to 0
         mask_MOA : torch.Tensor
             an boolean adjacency matrix of all nodes in the signaling network, with interactions that do not exist or have an unknown 
-            mechanism of action masked (False)
+            mechanism of action masked (True)
         """
     
         signed_MOA = self.edge_weights[0, :].type(torch.long) - self.edge_weights[1, :].type(torch.long) #1=activation -1=inhibition, 0=unknown
@@ -179,13 +179,45 @@ class BioNet(nn.Module):
         steady_state = X_new.T
         return steady_state
 
-    def L2Reg(self, L2):
-        #L2 = torch.tensor(L2, dtype = self.weights.dtype, device = self.weights.device)
-        biasLoss = L2 * torch.sum(torch.square(self.bias))
-        weightLoss = L2 * torch.sum(torch.square(self.weights))     
-        #biasLoss = 0.1 * torch.sum(torch.abs(self.bias))
-        #weightLoss = 0.1 * torch.sum(torch.abs(self.weights))
-        return L2 * (biasLoss + weightLoss)
+    def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
+        """Get the L2 regularization term for the neural network parameters.
+        
+        Parameters
+        ----------
+        lambda_2 : Annotated[float, Ge(0)]
+            the regularization parameter, by default 0 (no penalty) 
+        
+        Returns
+        -------
+        bionet_L2 : torch.Tensor
+            the regularization term
+        """
+        bias_loss = lambda_L2 * torch.sum(torch.square(self.bias))
+        weight_loss = lambda_L2 * torch.sum(torch.square(self.weights))
+
+        bionet_L2 = lambda_L2 * (bias_loss + weight_loss)
+        return bionet_L2
+
+    def sign_regularization(self, lambda_L1: float = 0):
+        """Get the L1 regularization term for the neural network parameters that 
+        do not fit the mechanism of action (i.e., positive weights for inhibiting interactions
+        and vice-versa). Only penalizes mismatches of known MOA.
+    
+        Parameters
+        ----------
+        lambda_L1 : float
+            the regularization parameter, by default 0 (no penalty) 
+    
+        Returns
+        -------
+        loss : 
+            
+        """
+        lambda_L1 = torch.tensor(lambda_L1, dtype = self.weights.dtype, device = self.weights.device)
+        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.weights.dtype) # 1 if learned weight does not match MOA (will be penalized), 0 otherwise
+        sign_mismatch = sign_mismatch.masked_fill(self.mask_MOA, 0) # do not penalize sign mismatches of unknown interactions by filling them with 0
+        loss = lambda_L1 * torch.sum(torch.abs(self.weights * sign_mismatch)) # penalizes sign mismatches of known MOA
+        return loss
 
     def getWeight(self, nodeNames, source, target):
         self.A.data = self.weights.detach().numpy()
@@ -243,12 +275,7 @@ class BioNet(nn.Module):
         wrongSignInhibition = torch.logical_and(violations, self.self.edge_weights[1])#.type(torch.int)
         return torch.logical_or(wrongSignActivation, wrongSignInhibition)
 
-    def signRegularization(self, MoAFactor):
-        MoAFactor = torch.tensor(MoAFactor, dtype = self.weights.dtype, device = self.weights.device)
-        signMissmatch = torch.ne(torch.sign(self.weights), self.self.weights_MOA).type(self.weights.dtype)
-        signMissmatch = signMissmatch.masked_fill(self.self.mask_MOA, 0)
-        loss = MoAFactor * torch.sum(torch.abs(self.weights * signMissmatch))
-        return loss
+
 
     def balanceWeights(self):
         positiveWeights = self.weights.data>0
