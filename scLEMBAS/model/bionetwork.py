@@ -14,7 +14,7 @@ import torch.nn as nn
 import sys
 sys.path.insert(1, "/home/hmbaghda/Projects/scLEMBAS/")
 from scLEMBAS.utils import np_to_torch
-from scLEMBAS.model import activation_functions as af
+from scLEMBAS.model.activation_functions import activation_function_map
 
 def format_network(net: pd.DataFrame, 
                    weight_label: str = 'mode_of_action', 
@@ -122,6 +122,292 @@ class ProjectInput(nn.Module):
         self.input_node_order = self.input_node_order.to(device)
         self.weights = self.weights.to(device)
 
+class BioNet(nn.Module):
+    def __init__(self, edge_list: np.array, 
+                 edge_weights: np.array, 
+                 n_network_nodes: int, 
+                 bionet_params: Dict[str, float], 
+                 activation_function: str = 'MML', 
+                 dtype: torch.dtype=torch.float32, 
+                device: str = 'cpu'):
+        """Initialization method.
+
+        Parameters
+        ----------
+        edge_list : np.array
+            a (2, net.shape[0]) array where the first row represents the indices for the target node and the 
+            second row represents the indices for the source node. net.shape[0] is the total # of interactions
+            output from  `SignalingModel.parse_network` 
+        edge_weights : np.array
+            a (2, net.shape[0]) array where the first row is a boolean of whether the interactions are stimulating and the 
+            second row is a boolean of whether the interactions are inhibiting
+            output from  `SignalingModel.parse_network`
+        n_network_nodes : int
+            the number of nodes in the network
+        bionet_params : Dict[str, float]
+            training parameters for the model
+            see `SignalingModel.set_training_parameters`
+        activation_function : str, optional
+            RNN activation function, by default 'MML'
+            options include:
+                - 'MML': Michaelis-Menten-like
+                - 'leaky_relu': Leaky ReLU
+                - 'sigmoid': sigmoid 
+        dtype : torch.dtype, optional
+           datatype to store values in torch, by default torch.float32
+        device : str
+            whether to use gpu ("cuda") or cpu ("cpu"), by default "cpu"
+        """
+        super().__init__()
+        self.training_params = bionet_params
+        self.dtype = dtype
+        self.device = device
+
+        self.n_network_nodes = n_network_nodes
+        # TODO: delete these _in _out?
+        self.n_network_nodes_in = n_network_nodes
+        self.n_network_nodes_out = n_network_nodes
+
+        self.edge_list = (np_to_torch(edge_list[0,:], dtype = torch.int32, device = 'cpu'), 
+                          np_to_torch(edge_list[1,:], dtype = torch.int32, device = 'cpu'))
+        self.edge_weights = np_to_torch(edge_weights, dtype=torch.bool, device = self.device)
+
+        # initialize weights and biases
+        weights, bias = self.initialize_weights()
+        self.weights = nn.Parameter(weights)
+        self.bias = nn.Parameter(bias)
+
+        self.weights_MOA, self.mask_MOA = self.make_mask_MOA() # mechanism of action 
+
+        # activation function
+        self.activation = activation_function_map[activation_function]['activation']
+        self.delta = activation_function_map[activation_function]['delta']
+        self.onestepdelta_activation_factor = activation_function_map[activation_function]['onestepdelta']
+
+    def initialize_weight_values(self):
+        """Initialize the RNN weight_values for all interactions in the signaling network.
+
+        Returns
+        -------
+        weight_values : torch.Tensor
+            a torch.Tensor with randomly initialized values for each signaling network interaction
+        bias : torch.Tensor
+            a torch.Tensor with randomly initialized values for each signaling network node
+        """
+        
+        network_targets = self.edge_list[0].numpy() # the target nodes receiving an edge
+        n_interactions = len(network_targets)
+        
+        weight_values = 0.1 + 0.1*torch.rand(n_interactions, dtype=self.dtype, device = self.device)
+        weight_values[self.edge_weights[1,:]] = -weight_values[self.edge_weights[1,:]] # make those that are inhibiting negative
+        
+        bias = 1e-3*torch.ones((self.n_network_nodes_in, 1), dtype = self.dtype, device = self.device)
+        
+        for nt_idx in np.unique(network_targets):
+            if torch.all(weight_values[network_targets == nt_idx]<0):
+                bias.data[nt_idx] = 1
+    
+        return weight_values, bias
+
+    def make_mask(self):
+        """Generates a mask for adjacency matrix for non-interacting nodes.
+
+        Returns
+        -------
+        weights_mask : torch.Tensor
+            a boolean adjacency matrix of all nodes in the signaling network, masking (True) interactions that are not present
+        """
+
+        weights_mask = torch.zeros(self.n_network_nodes, self.n_network_nodes, dtype=bool, device = self.device) # adjacency list format (targets (rows)--> sources (columns))
+        weights_mask[self.edge_list] = True # if interaction is present, do not mask
+        weights_mask = torch.logical_not(weights_mask) # make non-interacting edges False and vice-vesa
+        return weights_mask
+
+    def initialize_weights(self):
+        """Initializes weights and masks for interacting nodes and mechanism of action.
+
+        Returns
+        -------
+        weights : torch.Tensor
+            a torch.Tensor adjacency matrix with randomly initialized values for each signaling network interaction
+        bias : torch.Tensor
+            a torch.Tensor with randomly initialized values for each signaling network node
+        """
+
+        weight_values, bias = self.initialize_weight_values()
+        self.mask = self.make_mask()
+        weights = torch.zeros(self.mask.shape, dtype = self.dtype, device = self.device) # adjacency matrix
+        weights[self.edge_list] = weight_values
+        
+        return weights, bias
+
+    def make_mask_MOA(self):
+        """Generates mask (and weights) for adjacency matrix for non-interacting nodes AND nodes were mode of action (stimulating/inhibiting) 
+        is unknown.
+
+        Returns
+        -------
+        weights_MOA : torch.Tensor
+            an adjacency matrix of all nodes in the signaling network, with activating interactions set to 1, inhibiting interactions set 
+            to -1, and interactions that do not exist or have an unknown mechanism of action (stimulating/inhibiting) set to 0
+        mask_MOA : torch.Tensor
+            an boolean adjacency matrix of all nodes in the signaling network, with interactions that do not exist or have an unknown 
+            mechanism of action masked (True)
+        """
+    
+        signed_MOA = self.edge_weights[0, :].type(torch.long) - self.edge_weights[1, :].type(torch.long) #1=activation -1=inhibition, 0=unknown
+        weights_MOA = torch.zeros(self.n_network_nodes_out, self.n_network_nodes_in, dtype=torch.long, device = self.device) # adjacency matrix
+        weights_MOA[self.edge_list] = signed_MOA
+        mask_MOA = weights_MOA == 0
+
+        return weights_MOA, mask_MOA
+
+    def set_device(self, device: str):
+        """Sets torch.tensor objects to the device
+        Here, this pushes learned parameters towards `projection_amplitude` 
+        
+        Parameters
+        ----------
+        device : str
+            set to use gpu ("cuda") or cpu ("cpu")
+        """
+        self.edge_weights = self.edge_weights.to(device)
+        self.mask = self.mask.to(device)
+        self.weights_MOA = self.weights_MOA.to(device)
+        self.mask_MOA = self.mask_MOA.to(device)
+
+    def forward(self, X_full):
+        """Learn the edeg weights within the signaling network topology."""
+        self.weights.data.masked_fill_(mask = self.mask, value = 0.0) # fill non-interacting edges with 0
+        
+        X_bias = X_full.T + self.bias # this is the bias with the projection_amplitude included
+        X_new = torch.zeros_like(X_bias) #initialize all values at 0
+        
+        for t in range(self.training_params['maxSteps']): # like an RNN, updating from previous time step
+            X_old = X_new
+            X_new = torch.mm(self.weights, X_new) # scale matrix by edge weights
+            X_new = X_new + X_bias  # add original values and bias       
+            X_new = self.activation(X_new, self.training_params['leak'])
+            
+            if (t % 10 == 0) and (t > 20):
+                diff = torch.max(torch.abs(X_new - X_old))    
+                if diff.lt(self.training_params['tolerance']):
+                    break
+
+        steady_state = X_new.T
+        return steady_state
+
+    def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
+        """Get the L2 regularization term for the neural network parameters.
+        
+        Parameters
+        ----------
+        lambda_2 : Annotated[float, Ge(0)]
+            the regularization parameter, by default 0 (no penalty) 
+        
+        Returns
+        -------
+        bionet_L2 : torch.Tensor
+            the regularization term
+        """
+        bias_loss = lambda_L2 * torch.sum(torch.square(self.bias))
+        weight_loss = lambda_L2 * torch.sum(torch.square(self.weights))
+
+        bionet_L2 = bias_loss + weight_loss
+        return bionet_L2
+
+    def sign_regularization(self, lambda_L1: float = 0):
+        """Get the L1 regularization term for the neural network parameters that 
+        do not fit the mechanism of action (i.e., negative weights for stimulating interactions or positive weights for inhibiting interactions).
+        Only penalizes sign mismatches of known MOA.
+    
+        Parameters
+        ----------
+        lambda_L1 : float
+            the regularization parameter, by default 0 (no penalty) 
+    
+        Returns
+        -------
+        loss : torch.Tensor
+            the regularization term
+        """
+        lambda_L1 = torch.tensor(lambda_L1, dtype = self.weights.dtype, device = self.weights.device)
+        # 1 if learned weight does not match MOA (will be penalized), 0 otherwise
+        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.weights.dtype) 
+        sign_mismatch = sign_mismatch.masked_fill(self.mask_MOA, 0) # do not penalize sign mismatches of unknown interactions
+        loss = lambda_L1 * torch.sum(torch.abs(self.weights * sign_mismatch))
+        return loss
+
+    def getWeight(self, nodeNames, source, target):
+        self.A.data = self.weights.detach().numpy()
+        locationSource = numpy.argwhere(numpy.isin(nodeNames, source))[0]
+        locationTarget = numpy.argwhere(numpy.isin(nodeNames, target))[0]
+        weight = self.A[locationTarget, locationSource][0]
+        return weight
+    
+    def SS_loss(self, y_hat_full, factor, top_n = 10):
+        factor = torch.tensor(factor, dtype=y_hat_full.dtype, device=y_hat_full.device)
+        expFactor = torch.tensor(self.param['expFactor'], dtype=y_hat_full.dtype, device=y_hat_full.device)
+        
+        selectedValues = numpy.random.permutation(y_hat_full.shape[0])[:top_n]
+
+        SS_deviation, aproxSpectralRadius = self.SS_deviation(y_hat_full[selectedValues,:])        
+        spectralRadiusFactor = torch.exp(expFactor*(aproxSpectralRadius-self.param['spectralTarget']))
+        
+        loss = spectralRadiusFactor * SS_deviation/torch.sum(SS_deviation.detach())
+        loss = factor * torch.sum(loss)
+        aproxSpectralRadius = torch.mean(aproxSpectralRadius).item()
+
+        return loss, aproxSpectralRadius
+    
+    def SS_deviation(self, yHatSS):
+        nProbes = 5
+        powerSteps = 50
+
+        xPrime = self.onestepdelta_activation_factor(yHatSS, self.param['leak'])     
+        xPrime = xPrime.unsqueeze(2)
+        
+        T = xPrime * self.weights
+        delta = torch.randn((yHatSS.shape[0], yHatSS.shape[1], nProbes), dtype=yHatSS.dtype, device=yHatSS.device)
+        for i in range(powerSteps):
+            new = delta
+            delta = torch.matmul(T, new)
+
+        deviation = torch.max(torch.abs(delta), axis=1)[0]
+        aproxSpectralRadius = torch.mean(torch.exp(torch.log(deviation)/powerSteps), axis=1)
+        
+        deviation = torch.sum(torch.abs(delta), axis=1)
+        deviation = torch.mean(torch.exp(torch.log(deviation)/powerSteps), axis=1)
+
+        return deviation, aproxSpectralRadius    
+    
+    def getWeights(self):
+        values = self.weights[self.edge_list]
+        return values    
+
+    def getViolations(self):
+        #dtype = self.weights.dtype
+        signMissmatch = torch.ne(torch.sign(self.weights), self.self.weights_MOA) #.type(dtype)
+        signMissmatch = signMissmatch.masked_fill(self.self.mask_MOA, False)
+        violations = signMissmatch[self.edge_list]
+        wrongSignActivation = torch.logical_and(violations, self.self.edge_weights[0])
+        wrongSignInhibition = torch.logical_and(violations, self.self.edge_weights[1])#.type(torch.int)
+        return torch.logical_or(wrongSignActivation, wrongSignInhibition)
+
+    def balanceWeights(self):
+        positiveWeights = self.weights.data>0
+        negativeWeights = positiveWeights==False
+        positiveSum = torch.sum(self.weights.data[positiveWeights])
+        negativeSum = -torch.sum(self.weights.data[negativeWeights])
+        factor = positiveSum/negativeSum
+        self.weights.data[negativeWeights] = factor * self.weights.data[negativeWeights]
+
+    def preScaleWeights(self, targetRadius = 0.8):
+        spectralRadius = getSR(self.weights)
+        factor = targetRadius/spectralRadius.item()
+        self.weights.data = self.weights.data * factor
+
+
 class SignalingModel(torch.nn.Module):
     """Constructs the signaling network based RNN."""
     DEFAULT_TRAINING_PARAMETERS = {'targetSteps': 100, 'maxSteps': 300, 'expFactor': 20, 'leak': 0.01, 'tolerance': 1e-5}
@@ -181,17 +467,15 @@ class SignalingModel(torch.nn.Module):
 
         # define model layers 
         self.input_layer = ProjectInput(self.node_idx_map, self.input_labels, projection_amplitude, self.dtype, self.device)
-        # DELETE EVENTUALLy
-        self.edge_list, self.node_labels, self.edge_weights, self.bionet_params = edge_list, node_labels, edge_weights, bionet_params
+        # # DELETE EVENTUALLy
+        # self.edge_list, self.node_labels, self.edge_weights, self.bionet_params = edge_list, node_labels, edge_weights, bionet_params
         
-        # self.signaling_network = BioNet(edge_list = edge_list, 
-        #                                 edge_weights = edge_weights, 
-        #                                 n_network_nodes = len(node_labels), 
-        #                                 bionet_params = bionet_params, 
-        #                                 activation_function = activation_function, 
-        #                                 dtype = self.dtype)
-
-
+        self.signaling_network = BioNet(edge_list = edge_list, 
+                                        edge_weights = edge_weights, 
+                                        n_network_nodes = len(node_labels), 
+                                        bionet_params = bionet_params, 
+                                        activation_function = activation_function, 
+                                        dtype = self.dtype, device = self.device)
 
     def parse_network(self, net: pd.DataFrame, ban_list: List[str] = None, 
                  weight_label: str = 'mode_of_action', source_label: str = 'source', target_label: str = 'target'):
