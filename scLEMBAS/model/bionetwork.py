@@ -14,47 +14,8 @@ import torch.nn as nn
 import sys
 sys.path.insert(1, "/home/hmbaghda/Projects/scLEMBAS/")
 from scLEMBAS.utils import np_to_torch
+from scLEMBAS.model.model_utilities import format_network, get_spectral_radius
 from scLEMBAS.model.activation_functions import activation_function_map
-
-def format_network(net: pd.DataFrame, 
-                   weight_label: str = 'mode_of_action', 
-                   stimulation_label: str = 'stimulation', 
-                   inhibition_label: str = 'inhibition') -> pd.DataFrame:
-    """Formats the standard network file format to that needed by `SignalingModel.parse_network`
-
-    Parameters
-    ----------
-    net : pd.DataFrame
-        signaling network adjacency list with the following columns:
-            - `weight_label`: whether the interaction is stimulating (1) or inhibiting (-1) or unknown (0.1). Exclude non-interacting (0) nodes. 
-            - `stimulation_label`: binary whether an interaction is stimulating (1) or [not stimultaing or unknown] (0)
-            - `inhibition_label`: binary whether an interaction is inhibiting (1) or [not inhibiting or unknown] (0)
-    weight_label : str, optional
-        converts `stimulation_label` and `inhibition_label` to a single column of stimulating (1), inhibiting (-1), or
-        unknown (0.1), by default 'mode_of_action'
-    stimulation_label : str, optional
-        column name of stimulating interactions, see `net`, by default 'stimulation'
-    inhibition_label : str, optional
-        column name of inhibitory interactions, see `net`, by default 'inhibition'
-
-    Returns
-    -------
-    formatted_net : pd.DataFrame
-        the same dataframe with the additional `weight_label` column
-    """
-    if net[(net[stimulation_label] == 1) & (net[inhibition_label] == 1)].shape[0] > 0:
-        raise ValueError('An interaction can either be stimulating (1,0), inhibition (0,1) or unknown (0,0)')
-    
-    formatted_net = net.copy()
-    formatted_net[weight_label] = np.zeros(net.shape[0])
-    formatted_net.loc[formatted_net[stimulation_label] == 1, weight_label] = 1
-    formatted_net.loc[formatted_net[inhibition_label] == 1, weight_label] = -1
-    
-    #ensuring that lack of known MOA does not imply lack of representation in scipy.sparse.find(A)
-    formatted_net[weight_label] = formatted_net[weight_label].replace(0, 0.1)
-    formatted_net[weight_label] = formatted_net[weight_label].replace(np.nan, 0.1)
-
-    return formatted_net
 
 class ProjectInput(nn.Module):
     """Generate all nodes for the signaling network and linearly scale input ligand values by NN parameters."""
@@ -82,12 +43,25 @@ class ProjectInput(nn.Module):
         self.dtype = dtype
         self.projection_amplitude = projection_amplitude
         self.size_out = len(node_idx_map) # number of nodes total in prior knowledge network
-        self.input_node_order = torch.tensor([node_idx_map[x] for x in input_labels]) # idx representation of inputs
+        self.input_node_order = torch.tensor([node_idx_map[x] for x in input_labels]) # idx representation of ligand inputs
         weights = self.projection_amplitude * torch.ones(len(input_labels), dtype=self.dtype, device = self.device) # scaled input weights
         self.weights = nn.Parameter(weights)
         
-    def forward(self, X_in):
-        """Learn the weights for the input ligands to the signaling network"""
+    def forward(self, X_in: torch.Tensor):
+        """Learn the weights for the input ligands to the signaling network (if grad_fn set to False, 
+        simply scales by projection amplitude).
+        Transform from ligand input (samples x ligands) to full signaling network (samples x network nodes).
+
+        Parameters
+        ----------
+        X_in : torch.Tensor
+            the ligand concentration inputs. Shape is (samples x ligands). 
+
+        Returns
+        -------
+        X_full :  torch.Tensor
+            the linearly scaled ligand inputs. Shape is (samples x network nodes)
+        """
         X_full = torch.zeros([X_in.shape[0],  self.size_out], dtype=self.dtype, device=self.device) # shape of (samples x total nodes in network)
         X_full[:, self.input_node_order] = self.weights * X_in # only modify those nodes that are part of the input (ligands)
         return X_full
@@ -112,7 +86,6 @@ class ProjectInput(nn.Module):
     
     def set_device(self, device: str):
         """Sets torch.tensor objects to the device
-        Here, this pushes learned parameters towards `projection_amplitude` 
         
         Parameters
         ----------
@@ -262,6 +235,18 @@ class BioNet(nn.Module):
 
         return weights_MOA, mask_MOA
 
+    def prescale_weights(self, target_radius: float = 0.8):
+        """Scale weights according to spectral radius
+    
+        Parameters
+        ----------
+        target_radius : float, optional
+            _description_, by default 0.8
+        """
+        spectral_radius = get_spectral_radius(self.weights)
+        factor = target_radius/spectral_radius.item()
+        self.weights.data = self.weights.data * factor
+
     def set_device(self, device: str):
         """Sets torch.tensor objects to the device
         Here, this pushes learned parameters towards `projection_amplitude` 
@@ -276,8 +261,19 @@ class BioNet(nn.Module):
         self.weights_MOA = self.weights_MOA.to(device)
         self.mask_MOA = self.mask_MOA.to(device)
 
-    def forward(self, X_full):
-        """Learn the edeg weights within the signaling network topology."""
+    def forward(self, X_full: torch.Tensor):
+        """Learn the edeg weights within the signaling network topology.
+
+        Parameters
+        ----------
+        X_full : torch.Tensor
+            the linearly scaled ligand inputs. Shape is (samples x network nodes). Output of ProjectInput.
+
+        Returns
+        -------
+        Y_full :  torch.Tensor
+            the signaling network scaled by learned interaction weights. Shape is (samples x network nodes).
+        """
         self.weights.data.masked_fill_(mask = self.mask, value = 0.0) # fill non-interacting edges with 0
         
         X_bias = X_full.T + self.bias # this is the bias with the projection_amplitude included
@@ -294,8 +290,8 @@ class BioNet(nn.Module):
                 if diff.lt(self.training_params['tolerance']):
                     break
 
-        steady_state = X_new.T
-        return steady_state
+        Y_full = X_new.T
+        return Y_full
 
     def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
         """Get the L2 regularization term for the neural network parameters.
@@ -402,18 +398,72 @@ class BioNet(nn.Module):
         factor = positiveSum/negativeSum
         self.weights.data[negativeWeights] = factor * self.weights.data[negativeWeights]
 
-    def preScaleWeights(self, targetRadius = 0.8):
-        spectralRadius = getSR(self.weights)
-        factor = targetRadius/spectralRadius.item()
-        self.weights.data = self.weights.data * factor
+class ProjectOutput(nn.Module):
+    """Transforms signaling network to TF activity."""
+    def __init__(self, node_idx_map, output_labels, projection_amplitude, dtype):
+        super().__init__()
 
+        self.size_in = len(node_idx_map)
+        self.size_out = len(output_labels)
+        self.projection_amplitude = projection_amplitude
+
+        self.output_node_order = torch.tensor([node_idx_map[x] for x in output_labels]) # idx representation of TF outputs
+
+        weights = self.projection_amplitude * torch.ones(len(output_labels), dtype=dtype)
+        self.weights = nn.Parameter(weights)
+
+    def forward(self, Y_full):
+        """Learn the weights for the output TFs of the signaling network (if grad_fn set to False, 
+        simply scales by projection amplitude).
+        Transforms full signaling network  (samples x network nodes) to only the space of the TFs.
+
+        Parameters
+        ----------
+        Y_full : torch.Tensor
+            the signaling network scaled by learned interaction weights. Shape is (samples x network nodes). 
+            Output of BioNet.
+
+        Returns
+        -------
+        Y_hat :  torch.Tensor
+            the linearly scaled TF outputs. Shape is (samples x TFs)
+        """
+        Y_hat = self.weights * Y_full[:, self.output_node_order]
+        return Y_hat
+
+    def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
+        """Get the L2 regularization term for the neural network parameters.
+        Here, this pushes learned parameters towards `projection_amplitude` 
+        
+        Parameters
+        ----------
+        lambda_2 : Annotated[float, Ge(0)]
+            the regularization parameter, by default 0 (no penalty) 
+        
+        Returns
+        -------
+        projection_L2 : torch.Tensor
+            the regularization term
+        """
+        projection_L2 = lambda_L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
+        return projection_L2
+    
+    def set_device(self, device: str):
+        """Sets torch.tensor objects to the device
+        
+        Parameters
+        ----------
+        device : str
+            set to use gpu ("cuda") or cpu ("cpu")
+        """
+        self.output_node_order = self.output_node_order.to(device)
 
 class SignalingModel(torch.nn.Module):
     """Constructs the signaling network based RNN."""
     DEFAULT_TRAINING_PARAMETERS = {'targetSteps': 100, 'maxSteps': 300, 'expFactor': 20, 'leak': 0.01, 'tolerance': 1e-5}
     
     def __init__(self, net: pd.DataFrame, X_in: pd.DataFrame, y_out: pd.DataFrame,
-                 projection_amplitude: Union[int, float] = 1, projection_factor: float = 1,
+                 projection_amplitude_in: Union[int, float] = 1, projection_amplitude_out: float = 1,
                  ban_list: List[str] = None, weight_label: str = 'mode_of_action', 
                  source_label: str = 'source', target_label: str = 'target', 
                 bionet_params: Dict[str, float] = None , 
@@ -433,9 +483,9 @@ class SignalingModel(torch.nn.Module):
             output TF activities. Index represents samples and columns represent TFs. Values represent activity of the TF. 
         ban_list : List[str], optional
             a list of signaling network nodes to disregard, by default None
-        projection_amplitude : Union[int, float]
+        projection_amplitude_in : Union[int, float]
             value with which to scale ligand inputs by, by default 1 (see `ProjectInput` for details, can also be tuned as a learned parameter in the model)
-        projection_factor : float
+        projection_amplitude_out : float
             _description_
         bionet_params : Dict[str, float], optional
             training parameters for the model, by default None
@@ -462,20 +512,23 @@ class SignalingModel(torch.nn.Module):
         # filter for nodes in the network, sorting by node_labels order
         self.X_in = X_in.loc[:, np.intersect1d(X_in.columns.values, node_labels)]
         self.y_out = y_out.loc[:, np.intersect1d(y_out.columns.values, node_labels)]
-        self.input_labels = self.X_in.columns.values
-        self.output_labels = self.y_out.columns.values
 
-        # define model layers 
-        self.input_layer = ProjectInput(self.node_idx_map, self.input_labels, projection_amplitude, self.dtype, self.device)
-        # # DELETE EVENTUALLy
-        # self.edge_list, self.node_labels, self.edge_weights, self.bionet_params = edge_list, node_labels, edge_weights, bionet_params
-        
+        # define model layers
+        self.input_layer = ProjectInput(node_idx_map = self.node_idx_map, 
+                                        input_labels = self.X_in.columns.values, 
+                                        projection_amplitude = projection_amplitude_in, 
+                                        dtype = self.dtype, 
+                                        device = self.device)
         self.signaling_network = BioNet(edge_list = edge_list, 
                                         edge_weights = edge_weights, 
                                         n_network_nodes = len(node_labels), 
                                         bionet_params = bionet_params, 
                                         activation_function = activation_function, 
                                         dtype = self.dtype, device = self.device)
+        self.output_layer = ProjectOutput(node_idx_map = self.node_idx_map, 
+                                          output_labels = self.y_out.columns.values, 
+                                          projection_amplitude = projection_amplitude_out, 
+                                          dtype = self.dtype)
 
     def parse_network(self, net: pd.DataFrame, ban_list: List[str] = None, 
                  weight_label: str = 'mode_of_action', source_label: str = 'source', target_label: str = 'target'):
@@ -559,12 +612,14 @@ class SignalingModel(torch.nn.Module):
         return params
 
     def forward(self, X_in):
-        X_full = self.input_layer(X_in) # input ligand weights
+        """Linearly scales ligand inputs, learns weights for signaling network interactions, and transforms this to TF activity. See
+        `forward` methods of each layer for details."""
+        X_full = self.input_layer(X_in) # input ligands to signaling network
         Y_full = self.signaling_network(X_full) # RNN of full signaling network
-    #     Yhat = self.projectionLayer(Y_full)
-    #     return Yhat, fullY
+        Y_hat = mod.output_layer(Y_full) # TF outputs of signaling network
+        return Y_hat, Y_full
 
-    def L2_reg(self, lambda_L2):
+    def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
         """Get the L2 regularization term for the neural network parameters.
         
         Parameters
@@ -574,11 +629,19 @@ class SignalingModel(torch.nn.Module):
         
         Returns
         -------
-        tot_L2 : torch.Tensor
-            the regularization term (as the sum of the regularization terms for each parameter)
+         : torch.Tensor
+            the regularization term (as the sum of the regularization terms for each layer)
         """
-        inputL2 = self.input_layer.L2_reg(lambda_L2)
-        signalingL2 = self.signaling_network.L2_reg(lambda_L2)
-        # projectionL2 = self.projectionLayer.L2Reg(L2)
-        tot_L2 = inputL2 + signalingL2# + projectionL2
-        return tot_L2
+        return self.input_layer.L2_reg(lambda_L2) + self.signaling_network.L2_reg(lambda_L2) + self.output_layer.L2Reg(L2)
+
+    def set_device(self, device):
+        """Sets torch.tensor objects to the device. 
+        
+        Parameters
+        ----------
+        device : str
+            set to use gpu ("cuda") or cpu ("cpu")
+        """
+        self.input_layer.set_device(device)
+        self.signaling_network.set_device(device)
+        self.output_layer.set_device(device)
