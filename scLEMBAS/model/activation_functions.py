@@ -51,14 +51,14 @@ def MML_delta_activation(x: torch.Tensor, leak: Union[float, int]):
     y = y - (1-leak) * mask1
     return y
 
-def MML_onestepdelta_activation_factor(yhatFull: torch.Tensor, leak: Union[float, int]=0.01):
-    """Adjusts weights for linearization in the spectral adius. 
+def MML_onestepdelta_activation_factor(Y_full: torch.Tensor, leak: Union[float, int]=0.01):
+    """Adjusts weights for linearization in the spectral radius. 
 
     Note that this will only work for monotonic functions
 
     Parameters
     ----------
-    yhatFull : torch.Tensor
+    Y_full : torch.Tensor
         _description_
     leak : Union[float, int], optional
         parameter to tune extent of leaking, analogous to leaky ReLU, by default 0.01
@@ -69,11 +69,11 @@ def MML_onestepdelta_activation_factor(yhatFull: torch.Tensor, leak: Union[float
         _description_
     """
     
-    y = torch.ones_like(y_hat_full)
-    piece1 = y_hat_full.le(0)
-    piece3 = y_hat_full.gt(0.5)
+    y = torch.ones_like(Y_full)
+    piece1 = Y_full.le(0)
+    piece3 = Y_full.gt(0.5)
 
-    safe_x = torch.clamp(1-y_hat_full, max=0.9999)
+    safe_x = torch.clamp(1-Y_full, max=0.9999)
     right_values = 4 * torch.pow(safe_x, 2) - 1
     y = y + piece3 * right_values
     y = y - (1-leak) * piece1  
