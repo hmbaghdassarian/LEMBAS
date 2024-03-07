@@ -1,3 +1,7 @@
+"""
+Defines the various layers in the SignalingModel RNN.
+"""
+
 from typing import Dict, List, Union, Annotated
 from annotated_types import Ge
 
@@ -94,6 +98,7 @@ class ProjectInput(nn.Module):
         self.weights = self.weights.to(device)
 
 class BioNet(nn.Module):
+    """Builds the RNN on the signaling network topology."""
     def __init__(self, edge_list: np.array, 
                  edge_weights: np.array, 
                  n_network_nodes: int, 
@@ -137,7 +142,7 @@ class BioNet(nn.Module):
         self.dtype = dtype
         self.device = device
         self.seed = seed
-        self.seed_counter = 0
+        self._ss_seed_counter = 0
 
         self.n_network_nodes = n_network_nodes
         # TODO: delete these _in _out?
@@ -173,7 +178,8 @@ class BioNet(nn.Module):
         
         network_targets = self.edge_list[0].numpy() # the target nodes receiving an edge
         n_interactions = len(network_targets)
-        
+
+        set_seeds(self.seed)
         weight_values = 0.1 + 0.1*torch.rand(n_interactions, dtype=self.dtype, device = self.device)
         weight_values[self.edge_weights[1,:]] = -weight_values[self.edge_weights[1,:]] # make those that are inhibiting negative
         
@@ -227,7 +233,7 @@ class BioNet(nn.Module):
             an adjacency matrix of all nodes in the signaling network, with activating interactions set to 1, inhibiting interactions set 
             to -1, and interactions that do not exist or have an unknown mechanism of action (stimulating/inhibiting) set to 0
         mask_MOA : torch.Tensor
-            an boolean adjacency matrix of all nodes in the signaling network, with interactions that do not exist or have an unknown 
+            a boolean adjacency matrix of all nodes in the signaling network, with interactions that do not exist or have an unknown 
             mechanism of action masked (True)
         """
     
@@ -246,8 +252,8 @@ class BioNet(nn.Module):
         target_radius : float, optional
             _description_, by default 0.8
         """
-        # spectral_radius = get_spectral_radius(self.weights)
-        A = scipy.sparse.csr_matrix(self.weights.detach().numpy())
+
+        A = scipy.sparse.csr_matrix(self.weights.detach().cpu().numpy())
         eigen_value, _ = eigs(A, k = 1) # first eigen value
         spectral_radius = np.abs(eigen_value)
         
@@ -319,6 +325,35 @@ class BioNet(nn.Module):
         bionet_L2 = bias_loss + weight_loss
         return bionet_L2
 
+    def get_sign_mistmatch(self):
+        """Identifies edge weights in network that have a sign that does not agree
+        with the known mode of action.
+    
+        Mode of action: stimulating interactions are expected to have positive weights and inhibiting interactions
+        are expected to have negative weights.
+        
+        Returns
+        -------
+        sign_mismatch : torch.Tensor
+            a binary adjacency matrix of all nodes in the signaling network, where values are 1 if they do not 
+            match the mode of action and 0 if they match the mode of action or have an unknown mode of action
+        """
+        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.weights.dtype) 
+        sign_mismatch = sign_mismatch.masked_fill(self.mask_MOA, 0) # do not penalize sign mismatches of unknown interactions
+    
+        return sign_mismatch
+
+    def count_sign_mismatch(self):
+        """Counts total sign mismatches identified in `get_sign_mistmatch`
+        
+        Returns
+        -------
+        n_sign_mismatches : float
+            the total number of sign mismatches at `iter`
+        """
+        n_sign_mismatches = torch.sum(self.get_sign_mistmatch()).item()
+        return n_sign_mismatches
+
     def sign_regularization(self, lambda_L1: Annotated[float, Ge(0)] = 0):
         """Get the L1 regularization term for the neural network parameters that 
         do not fit the mechanism of action (i.e., negative weights for stimulating interactions or positive weights for inhibiting interactions).
@@ -335,17 +370,36 @@ class BioNet(nn.Module):
             the regularization term
         """
         lambda_L1 = torch.tensor(lambda_L1, dtype = self.weights.dtype, device = self.weights.device)
-        # 1 if learned weight does not match MOA (will be penalized), 0 otherwise
-        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.weights.dtype) 
-        sign_mismatch = sign_mismatch.masked_fill(self.mask_MOA, 0) # do not penalize sign mismatches of unknown interactions
+        sign_mismatch = self.get_sign_mistmatch() # will not penalize sign mismatches of unknown interactions
+
         loss = lambda_L1 * torch.sum(torch.abs(self.weights * sign_mismatch))
         return loss
+
+    # def get_sign_mistmatch_edge_list(self):
+    #     """Same as `get_sign_mistmatch`, but converts to coordinates corresponding to `edge_list`
+        
+    #     Returns
+    #     -------
+    #     sign_mismatch : torch.Tensor
+    #         a binary vector corresponding to coordinates in `edge_list`, where values are 1 if they do not 
+    #         match the mode of action and 0 if they match the mode of action or have an unknown mode of action
+    #     """
+    #     sign_mismatch = self.get_sign_mistmatch()
+        
+    #     # violations = sign_mismatch[self.edge_list] # 1 for interactions in edge list that mismatch, 0 otherwise
+    #     # activation_mismatch = torch.logical_and(violations, self.edge_weights[0])
+    #     # inhibition_mismatch = torch.logical_and(violations, self.edge_weights[1])
+    #     # all_mismatch = torch.logical_or(activation_mismatch, inhibition_mismatch)
+        
+    #     sign_mismatch_edge = sign_mismatch[self.edge_list] # 1 for interactions in edge list that mismatch, 0 otherwise
+        
+    #     return sign_mismatch_edge
 
     def get_SS_loss(self, Y_full: torch.Tensor, spectral_loss_factor: float, subset_n: int = 10, **kwargs):
         spectral_loss_factor = torch.tensor(spectral_loss_factor, dtype=Y_full.dtype, device=Y_full.device)
         exp_factor = torch.tensor(self.training_params['expFactor'], dtype=Y_full.dtype, device=Y_full.device)
     
-        np.random.seed(self.seed + self.seed_counter)
+        np.random.seed(self.seed + self._ss_seed_counter)
         selected_values = np.random.permutation(Y_full.shape[0])[:subset_n]
     
         SS_deviation, aprox_spectral_radius = self._get_SS_deviation(Y_full[selected_values,:], **kwargs)        
@@ -355,7 +409,7 @@ class BioNet(nn.Module):
         loss = spectral_loss_factor * torch.sum(loss)
         aprox_spectral_radius = torch.mean(aprox_spectral_radius).item()
 
-        self.seed_counter += 1 # new seed each time this (and _get_SS_deviation) is called
+        self._ss_seed_counter += 1 # new seed each time this (and _get_SS_deviation) is called
     
         return loss, aprox_spectral_radius
     
@@ -364,7 +418,8 @@ class BioNet(nn.Module):
         x_prime = x_prime.unsqueeze(2)
         
         T = x_prime * self.weights
-        set_seeds(self.seed + self.seed_counter)
+        if self.seed:
+            set_seeds(self.seed + self._ss_seed_counter)
         delta = torch.randn((Y_full_sub.shape[0], Y_full_sub.shape[1], n_probes), dtype=Y_full_sub.dtype, device=Y_full_sub.device)
         for i in range(power_steps):
             new = delta
@@ -376,37 +431,7 @@ class BioNet(nn.Module):
         SS_deviation = torch.sum(torch.abs(delta), axis=1)
         SS_deviation = torch.mean(torch.exp(torch.log(SS_deviation)/power_steps), axis=1)
     
-        return SS_deviation, aprox_spectral_radius  
-
-    # def getWeight(self, nodeNames, source, target):
-    #     self.A.data = self.weights.detach().numpy()
-    #     locationSource = numpy.argwhere(numpy.isin(nodeNames, source))[0]
-    #     locationTarget = numpy.argwhere(numpy.isin(nodeNames, target))[0]
-    #     weight = self.A[locationTarget, locationSource][0]
-    #     return weight
-    
-  
-    
-    # def getWeights(self):
-    #     values = self.weights[self.edge_list]
-    #     return values    
-
-    # def getViolations(self):
-    #     #dtype = self.weights.dtype
-    #     signMissmatch = torch.ne(torch.sign(self.weights), self.self.weights_MOA) #.type(dtype)
-    #     signMissmatch = signMissmatch.masked_fill(self.self.mask_MOA, False)
-    #     violations = signMissmatch[self.edge_list]
-    #     wrongSignActivation = torch.logical_and(violations, self.self.edge_weights[0])
-    #     wrongSignInhibition = torch.logical_and(violations, self.self.edge_weights[1])#.type(torch.int)
-    #     return torch.logical_or(wrongSignActivation, wrongSignInhibition)
-
-    # def balanceWeights(self):
-    #     positiveWeights = self.weights.data>0
-    #     negativeWeights = positiveWeights==False
-    #     positiveSum = torch.sum(self.weights.data[positiveWeights])
-    #     negativeSum = -torch.sum(self.weights.data[negativeWeights])
-    #     factor = positiveSum/negativeSum
-    #     self.weights.data[negativeWeights] = factor * self.weights.data[negativeWeights]
+        return SS_deviation, aprox_spectral_radius
 
 class ProjectOutput(nn.Module):
     """Transforms signaling network to TF activity."""
@@ -522,7 +547,7 @@ class SignalingModel(torch.nn.Module):
         self.dtype = dtype
         self.device = device
         self.seed = seed
-        self.seed_counter = 0
+        self._gradient_seed_counter = 0
         self.projection_amplitude_out = projection_amplitude_out
 
         edge_list, node_labels, edge_weights = self.parse_network(net, ban_list, weight_label, source_label, target_label)
@@ -731,11 +756,11 @@ class SignalingModel(torch.nn.Module):
             scaling factor for amount of noise to add 
         """
         all_params = list(self.parameters())
-
-        set_seeds(self.seed + self.seed_counter)
+        if self.seed:
+            set_seeds(self.seed + self._gradient_seed_counter)
         for i in range(len(all_params)):
             if all_params[i].requires_grad:
                 all_noise = torch.randn(all_params[i].grad.shape, dtype=all_params[i].dtype, device=all_params[i].device)
                 all_params[i].grad += (noise_level * all_noise)
     
-        self.seed_counter += 1 # new random noise each time function is called
+        self._gradient_seed_counter += 1 # new random noise each time function is called
