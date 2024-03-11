@@ -1,6 +1,7 @@
 """
 Helper functions for running and training the SignalingModel. 
 """
+import os
 import time
 from typing import List
 
@@ -15,8 +16,11 @@ def set_seeds(seed: int=888):
     seed : int, optional
         seed value, by default 888
     """
+    if 'CUBLAS_WORKSPACE_CONFIG' not in os.environ.keys():
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+
 
 def get_lr(iter: int, max_iter: int, max_height: float = 1e-3, 
              start_height: float=1e-5, end_height: float=1e-5, 
@@ -149,3 +153,25 @@ def print_stats(stats, iter):
         msg += ', v={:.0f}'.format(stats['violations'][iter])
         
     print(msg)
+
+def get_moving_average(values: np.array, n_steps: int):
+    """Get the moving average of a tracked state across n_steps. Serves to smooth value. 
+
+    Parameters
+    ----------
+    values : np.array
+        values on which to get the moving average
+    n_steps : int
+        number of steps across which to get the moving average
+
+    Returns
+    -------
+    moving_average : np.array
+        the moving average across values
+    """
+    moving_average = np.zeros(values.shape)
+    for i in range(values.shape[0]):
+        start = np.max((i-np.ceil(n_steps/2), 0)).astype(int)
+        stop = np.min((i+np.ceil(n_steps/2), values.shape[0])).astype(int)
+        moving_average[i] = np.mean(values[start:stop])
+    return moving_average

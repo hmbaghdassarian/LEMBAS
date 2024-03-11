@@ -6,11 +6,13 @@ channels:
 dependencies:    
     - https://ftp.osuosl.org/pub/open-ce/current::pytorch # replace with below for OS other than ppc64le
     - conda-forge::scanpy
-    - conda-forge::matplotlib
+    # - conda-forge::matplotlib
     - conda-forge::pip
     - conda-forge::omnipath
     - conda-forge::kneed
     - conda-forge::leidenalg
+    - conda-forge::plotnine
+    # - conda-forge::patchworklib
     - pip:
         - decoupler==1.5.0
 

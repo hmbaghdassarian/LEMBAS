@@ -45,7 +45,7 @@ class ProjectInput(nn.Module):
         self.dtype = dtype
         self.projection_amplitude = projection_amplitude
         self.size_out = len(node_idx_map) # number of nodes total in prior knowledge network
-        self.input_node_order = torch.tensor([node_idx_map[x] for x in input_labels]) # idx representation of ligand inputs
+        self.input_node_order = torch.tensor([node_idx_map[x] for x in input_labels], device = self.device) # idx representation of ligand inputs
         weights = self.projection_amplitude * torch.ones(len(input_labels), dtype=self.dtype, device = self.device) # scaled input weights
         self.weights = nn.Parameter(weights)
         
@@ -85,17 +85,6 @@ class ProjectInput(nn.Module):
         # if removed the `- self.projection_amplitude` part, would force weights to 0, thus shrinking ligand inputs
         projection_L2 = lambda_L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
         return projection_L2
-    
-    def set_device(self, device: str):
-        """Sets torch.tensor objects to the device
-        
-        Parameters
-        ----------
-        device : str
-            set to use gpu ("cuda") or cpu ("cpu")
-        """
-        self.input_node_order = self.input_node_order.to(device)
-        self.weights = self.weights.to(device)
 
 class BioNet(nn.Module):
     """Builds the RNN on the signaling network topology."""
@@ -254,25 +243,12 @@ class BioNet(nn.Module):
         """
 
         A = scipy.sparse.csr_matrix(self.weights.detach().cpu().numpy())
-        eigen_value, _ = eigs(A, k = 1) # first eigen value
+        np.random.seed(self.seed)
+        eigen_value, _ = eigs(A, k = 1, v0 = np.random.rand(A.shape[0])) # first eigen value
         spectral_radius = np.abs(eigen_value)
         
         factor = target_radius/spectral_radius.item()
         self.weights.data = self.weights.data * factor
-
-    def set_device(self, device: str):
-        """Sets torch.tensor objects to the device
-        Here, this pushes learned parameters towards `projection_amplitude` 
-        
-        Parameters
-        ----------
-        device : str
-            set to use gpu ("cuda") or cpu ("cpu")
-        """
-        self.edge_weights = self.edge_weights.to(device)
-        self.mask = self.mask.to(device)
-        self.weights_MOA = self.weights_MOA.to(device)
-        self.mask_MOA = self.mask_MOA.to(device)
 
     def forward(self, X_full: torch.Tensor):
         """Learn the edeg weights within the signaling network topology.
@@ -338,7 +314,7 @@ class BioNet(nn.Module):
             a binary adjacency matrix of all nodes in the signaling network, where values are 1 if they do not 
             match the mode of action and 0 if they match the mode of action or have an unknown mode of action
         """
-        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.weights.dtype) 
+        sign_mismatch = torch.ne(torch.sign(self.weights), self.weights_MOA).type(self.dtype) 
         sign_mismatch = sign_mismatch.masked_fill(self.mask_MOA, 0) # do not penalize sign mismatches of unknown interactions
     
         return sign_mismatch
@@ -369,7 +345,7 @@ class BioNet(nn.Module):
         loss : torch.Tensor
             the regularization term
         """
-        lambda_L1 = torch.tensor(lambda_L1, dtype = self.weights.dtype, device = self.weights.device)
+        lambda_L1 = torch.tensor(lambda_L1, dtype = self.dtype, device = self.device)
         sign_mismatch = self.get_sign_mistmatch() # will not penalize sign mismatches of unknown interactions
 
         loss = lambda_L1 * torch.sum(torch.abs(self.weights * sign_mismatch))
@@ -396,10 +372,28 @@ class BioNet(nn.Module):
     #     return sign_mismatch_edge
 
     def get_SS_loss(self, Y_full: torch.Tensor, spectral_loss_factor: float, subset_n: int = 10, **kwargs):
+        """_summary_
+    
+        Parameters
+        ----------
+        Y_full : torch.Tensor
+            output of the forward pass
+            ensure to run `torch.Tensor.detach` method prior to inputting so that gradient calculations are not effected
+        spectral_loss_factor : float
+            _description_
+        subset_n : int, optional
+            _description_, by default 10
+    
+        Returns
+        -------
+        _type_
+            _description_
+        """
         spectral_loss_factor = torch.tensor(spectral_loss_factor, dtype=Y_full.dtype, device=Y_full.device)
         exp_factor = torch.tensor(self.training_params['expFactor'], dtype=Y_full.dtype, device=Y_full.device)
     
-        np.random.seed(self.seed + self._ss_seed_counter)
+        if self.seed:
+            np.random.seed(self.seed + self._ss_seed_counter)
         selected_values = np.random.permutation(Y_full.shape[0])[:subset_n]
     
         SS_deviation, aprox_spectral_radius = self._get_SS_deviation(Y_full[selected_values,:], **kwargs)        
@@ -408,7 +402,7 @@ class BioNet(nn.Module):
         loss = spectral_radius_factor * SS_deviation/torch.sum(SS_deviation.detach())
         loss = spectral_loss_factor * torch.sum(loss)
         aprox_spectral_radius = torch.mean(aprox_spectral_radius).item()
-
+    
         self._ss_seed_counter += 1 # new seed each time this (and _get_SS_deviation) is called
     
         return loss, aprox_spectral_radius
@@ -435,16 +429,16 @@ class BioNet(nn.Module):
 
 class ProjectOutput(nn.Module):
     """Transforms signaling network to TF activity."""
-    def __init__(self, node_idx_map, output_labels, projection_amplitude, dtype):
+    def __init__(self, node_idx_map, output_labels, projection_amplitude, dtype, device):
         super().__init__()
 
         self.size_in = len(node_idx_map)
         self.size_out = len(output_labels)
         self.projection_amplitude = projection_amplitude
 
-        self.output_node_order = torch.tensor([node_idx_map[x] for x in output_labels]) # idx representation of TF outputs
+        self.output_node_order = torch.tensor([node_idx_map[x] for x in output_labels], device = device) # idx representation of TF outputs
 
-        weights = self.projection_amplitude * torch.ones(len(output_labels), dtype=dtype)
+        weights = self.projection_amplitude * torch.ones(len(output_labels), dtype=dtype, device = device)
         self.weights = nn.Parameter(weights)
 
     def forward(self, Y_full):
@@ -483,15 +477,15 @@ class ProjectOutput(nn.Module):
         projection_L2 = lambda_L2 * torch.sum(torch.square(self.weights - self.projection_amplitude))  
         return projection_L2
     
-    def set_device(self, device: str):
-        """Sets torch.tensor objects to the device
+    # def set_device(self, device: str):
+    #     """Sets torch.tensor objects to the device
         
-        Parameters
-        ----------
-        device : str
-            set to use gpu ("cuda") or cpu ("cpu")
-        """
-        self.output_node_order = self.output_node_order.to(device)
+    #     Parameters
+    #     ----------
+    #     device : str
+    #         set to use gpu ("cuda") or cpu ("cpu")
+    #     """
+    #     self.output_node_order = self.output_node_order.to(device)
 
 class SignalingModel(torch.nn.Module):
     """Constructs the signaling network based RNN."""
@@ -575,7 +569,7 @@ class SignalingModel(torch.nn.Module):
         self.output_layer = ProjectOutput(node_idx_map = self.node_idx_map, 
                                           output_labels = self.y_out.columns.values, 
                                           projection_amplitude = self.projection_amplitude_out, 
-                                          dtype = self.dtype)
+                                          dtype = self.dtype, device = device)
 
     def parse_network(self, net: pd.DataFrame, ban_list: List[str] = None, 
                  weight_label: str = 'mode_of_action', source_label: str = 'source', target_label: str = 'target'):
@@ -635,7 +629,7 @@ class SignalingModel(torch.nn.Module):
 
     def df_to_tensor(self, df: pd.DataFrame):
         """Converts a pandas dataframe to the appropriate torch.tensor"""
-        return torch.tensor(df.values.copy(), dtype=self.dtype).to(self.device)
+        return torch.tensor(df.values.copy(), dtype=self.dtype, device = self.device)
 
     def set_training_parameters(self, **attributes):
         """Set the parameters for training the model. Overrides default parameters with attributes if specified.
@@ -663,7 +657,7 @@ class SignalingModel(torch.nn.Module):
         `forward` methods of each layer for details."""
         X_full = self.input_layer(X_in) # input ligands to signaling network
         Y_full = self.signaling_network(X_full) # RNN of full signaling network
-        Y_hat = mod.output_layer(Y_full) # TF outputs of signaling network
+        Y_hat = self.output_layer(Y_full) # TF outputs of signaling network
         return Y_hat, Y_full
 
     def L2_reg(self, lambda_L2: Annotated[float, Ge(0)] = 0):
@@ -734,18 +728,6 @@ class SignalingModel(torch.nn.Module):
         above_loss = torch.sum(Y_full.gt(target_max) * torch.square(Y_full-target_max)) # those that are above the maximum value
         loss = lambda_L2*(dist_loss + below_loss + above_loss)
         return loss
-
-    def set_device(self, device):
-        """Sets torch.tensor objects to the device. 
-        
-        Parameters
-        ----------
-        device : str
-            set to use gpu ("cuda") or cpu ("cpu")
-        """
-        self.input_layer.set_device(device)
-        self.signaling_network.set_device(device)
-        self.output_layer.set_device(device)
 
     def add_gradient_noise(self, noise_level: Union[float, int]):
         """Adds noise to backwards pass gradient calculations. Use during training to make model more robust. 
