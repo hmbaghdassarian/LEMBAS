@@ -15,7 +15,7 @@ import torch.nn as nn
 
 import sys
 sys.path.insert(1, "/home/hmbaghda/Projects/scLEMBAS/")
-from scLEMBAS.model.model_utilities import np_to_torch, format_network#, get_spectral_radius,expected_uniform_distribution
+from scLEMBAS.model.model_utilities import np_to_torch, format_network
 from scLEMBAS.model.activation_functions import activation_function_map
 from scLEMBAS.utilities import set_seeds
 
@@ -89,7 +89,7 @@ class ProjectInput(nn.Module):
 class BioNet(nn.Module):
     """Builds the RNN on the signaling network topology."""
     def __init__(self, edge_list: np.array, 
-                 edge_weights: np.array, 
+                 edge_MOA: np.array, 
                  n_network_nodes: int, 
                  bionet_params: Dict[str, float], 
                  activation_function: str = 'MML', 
@@ -104,7 +104,7 @@ class BioNet(nn.Module):
             a (2, net.shape[0]) array where the first row represents the indices for the target node and the 
             second row represents the indices for the source node. net.shape[0] is the total # of interactions
             output from  `SignalingModel.parse_network` 
-        edge_weights : np.array
+        edge_MOA : np.array
             a (2, net.shape[0]) array where the first row is a boolean of whether the interactions are stimulating and the 
             second row is a boolean of whether the interactions are inhibiting
             output from  `SignalingModel.parse_network`
@@ -140,7 +140,7 @@ class BioNet(nn.Module):
 
         self.edge_list = (np_to_torch(edge_list[0,:], dtype = torch.int32, device = 'cpu'), 
                           np_to_torch(edge_list[1,:], dtype = torch.int32, device = 'cpu'))
-        self.edge_weights = np_to_torch(edge_weights, dtype=torch.bool, device = self.device)
+        self.edge_MOA = np_to_torch(edge_MOA, dtype=torch.bool, device = self.device)
 
         # initialize weights and biases
         weights, bias = self.initialize_weights()
@@ -170,7 +170,7 @@ class BioNet(nn.Module):
 
         set_seeds(self.seed)
         weight_values = 0.1 + 0.1*torch.rand(n_interactions, dtype=self.dtype, device = self.device)
-        weight_values[self.edge_weights[1,:]] = -weight_values[self.edge_weights[1,:]] # make those that are inhibiting negative
+        weight_values[self.edge_MOA[1,:]] = -weight_values[self.edge_MOA[1,:]] # make those that are inhibiting negative
         
         bias = 1e-3*torch.ones((self.n_network_nodes_in, 1), dtype = self.dtype, device = self.device)
         
@@ -226,7 +226,7 @@ class BioNet(nn.Module):
             mechanism of action masked (True)
         """
     
-        signed_MOA = self.edge_weights[0, :].type(torch.long) - self.edge_weights[1, :].type(torch.long) #1=activation -1=inhibition, 0=unknown
+        signed_MOA = self.edge_MOA[0, :].type(torch.long) - self.edge_MOA[1, :].type(torch.long) #1=activation -1=inhibition, 0=unknown
         weights_MOA = torch.zeros(self.n_network_nodes_out, self.n_network_nodes_in, dtype=torch.long, device = self.device) # adjacency matrix
         weights_MOA[self.edge_list] = signed_MOA
         mask_MOA = weights_MOA == 0
@@ -268,7 +268,7 @@ class BioNet(nn.Module):
         X_bias = X_full.T + self.bias # this is the bias with the projection_amplitude included
         X_new = torch.zeros_like(X_bias) #initialize all values at 0
         
-        for t in range(self.training_params['maxSteps']): # like an RNN, updating from previous time step
+        for t in range(self.training_params['max_steps']): # like an RNN, updating from previous time step
             X_old = X_new
             X_new = torch.mm(self.weights, X_new) # scale matrix by edge weights
             X_new = X_new + X_bias  # add original values and bias       
@@ -363,8 +363,8 @@ class BioNet(nn.Module):
     #     sign_mismatch = self.get_sign_mistmatch()
         
     #     # violations = sign_mismatch[self.edge_list] # 1 for interactions in edge list that mismatch, 0 otherwise
-    #     # activation_mismatch = torch.logical_and(violations, self.edge_weights[0])
-    #     # inhibition_mismatch = torch.logical_and(violations, self.edge_weights[1])
+    #     # activation_mismatch = torch.logical_and(violations, self.edge_MOA[0])
+    #     # inhibition_mismatch = torch.logical_and(violations, self.edge_MOA[1])
     #     # all_mismatch = torch.logical_or(activation_mismatch, inhibition_mismatch)
         
     #     sign_mismatch_edge = sign_mismatch[self.edge_list] # 1 for interactions in edge list that mismatch, 0 otherwise
@@ -390,14 +390,14 @@ class BioNet(nn.Module):
             _description_
         """
         spectral_loss_factor = torch.tensor(spectral_loss_factor, dtype=Y_full.dtype, device=Y_full.device)
-        exp_factor = torch.tensor(self.training_params['expFactor'], dtype=Y_full.dtype, device=Y_full.device)
+        exp_factor = torch.tensor(self.training_params['exp_factor'], dtype=Y_full.dtype, device=Y_full.device)
     
         if self.seed:
             np.random.seed(self.seed + self._ss_seed_counter)
         selected_values = np.random.permutation(Y_full.shape[0])[:subset_n]
     
         SS_deviation, aprox_spectral_radius = self._get_SS_deviation(Y_full[selected_values,:], **kwargs)        
-        spectral_radius_factor = torch.exp(exp_factor*(aprox_spectral_radius-self.training_params['spectralTarget']))
+        spectral_radius_factor = torch.exp(exp_factor*(aprox_spectral_radius-self.training_params['spectral_target']))
         
         loss = spectral_radius_factor * SS_deviation/torch.sum(SS_deviation.detach())
         loss = spectral_loss_factor * torch.sum(loss)
@@ -489,7 +489,7 @@ class ProjectOutput(nn.Module):
 
 class SignalingModel(torch.nn.Module):
     """Constructs the signaling network based RNN."""
-    DEFAULT_TRAINING_PARAMETERS = {'targetSteps': 100, 'maxSteps': 300, 'expFactor': 20, 'leak': 0.01, 'tolerance': 1e-5}
+    DEFAULT_TRAINING_PARAMETERS = {'target_steps': 100, 'max_steps': 300, 'exp_factor': 20, 'leak': 0.01, 'tolerance': 1e-5}
     
     def __init__(self, net: pd.DataFrame, X_in: pd.DataFrame, y_out: pd.DataFrame,
                  projection_amplitude_in: Union[int, float] = 1, projection_amplitude_out: float = 1,
@@ -519,11 +519,11 @@ class SignalingModel(torch.nn.Module):
         bionet_params : Dict[str, float], optional
             training parameters for the model, by default None
             Key values include:
-                - 'maxSteps': maximum number of time steps of the RNN, by default 300
+                - 'max_steps': maximum number of time steps of the RNN, by default 300
                 - 'tolerance': threshold at which to break RNN; based on magnitude of change of updated edge weight values, by default 1e-5
                 - 'leak': parameter to tune extent of leaking, analogous to leaky ReLU, by default 0.01
-                - 'spectralTarget': _description_, by default np.exp(np.log(params['tolerance'])/params['targetSteps'])
-                - 'expFactor': _description_, by default 20
+                - 'spectral_target': _description_, by default np.exp(np.log(params['tolerance'])/params['target_steps'])
+                - 'exp_factor': _description_, by default 20
         activation_function : str, optional
             RNN activation function, by default 'MML'
             options include:
@@ -544,7 +544,7 @@ class SignalingModel(torch.nn.Module):
         self._gradient_seed_counter = 0
         self.projection_amplitude_out = projection_amplitude_out
 
-        edge_list, node_labels, edge_weights = self.parse_network(net, ban_list, weight_label, source_label, target_label)
+        edge_list, node_labels, edge_MOA = self.parse_network(net, ban_list, weight_label, source_label, target_label)
         if not bionet_params:
             bionet_params = self.DEFAULT_TRAINING_PARAMETERS.copy()
         else:
@@ -561,7 +561,7 @@ class SignalingModel(torch.nn.Module):
                                         dtype = self.dtype, 
                                         device = self.device)
         self.signaling_network = BioNet(edge_list = edge_list, 
-                                        edge_weights = edge_weights, 
+                                        edge_MOA = edge_MOA, 
                                         n_network_nodes = len(node_labels), 
                                         bionet_params = bionet_params, 
                                         activation_function = activation_function, 
@@ -573,7 +573,7 @@ class SignalingModel(torch.nn.Module):
 
     def parse_network(self, net: pd.DataFrame, ban_list: List[str] = None, 
                  weight_label: str = 'mode_of_action', source_label: str = 'source', target_label: str = 'target'):
-        """Parse adjacency network . Adapted from LEMBAS `loadNetwork` and `makeNetworkList`.
+        """Parse adjacency network.
     
         Parameters
         ----------
@@ -593,11 +593,11 @@ class SignalingModel(torch.nn.Module):
             second row represents the indices for the source node. net.shape[0] is the total # of interactions
         node_labels : list
             a list of the network nodes in the same order as the indices
-        edge_weights : np.array
+        edge_MOA : np.array
             a (2, net.shape[0]) array where the first row is a boolean of whether the interactions are stimulating and the 
             second row is a boolean of whether the interactions are inhibiting. 
             
-            Note: Edge_list includes interactions that are not delineated as activating OR inhibiting, s.t. edge_weights records this 
+            Note: Edge_list includes interactions that are not delineated as activating OR inhibiting, s.t. edge_MOA records this 
             as [False, False].
         """
         if not ban_list:
@@ -617,15 +617,15 @@ class SignalingModel(torch.nn.Module):
 
         # # get edge list
         # edge_list = np.array((target_indices, source_indices))
-        # edge_weights = net[weight_label].values
+        # edge_MOA = net[weight_label].values
         # get edge list *ordered by source-target node index*
         n_nodes = len(node_labels)
         A = scipy.sparse.csr_matrix((net[weight_label].values, (source_indices, target_indices)), shape=(n_nodes, n_nodes)) # calculate adjacency matrix
-        source_indices, target_indices, edge_weights = scipy.sparse.find(A) # re-orders adjacency list by index
+        source_indices, target_indices, edge_MOA = scipy.sparse.find(A) # re-orders adjacency list by index
         edge_list = np.array((target_indices, source_indices)) 
-        edge_weights = np.array([[edge_weights==1],[edge_weights==-1]]).squeeze() # convert to boolean
+        edge_MOA = np.array([[edge_MOA==1],[edge_MOA==-1]]).squeeze() # convert to boolean
 
-        return edge_list, node_labels, edge_weights
+        return edge_list, node_labels, edge_MOA
 
     def df_to_tensor(self, df: pd.DataFrame):
         """Converts a pandas dataframe to the appropriate torch.tensor"""
@@ -642,11 +642,11 @@ class SignalingModel(torch.nn.Module):
         """
         #set defaults
         default_parameters = self.DEFAULT_TRAINING_PARAMETERS.copy()
-        allowed_params = list(default_parameters.keys()) + ['spectralTarget']
+        allowed_params = list(default_parameters.keys()) + ['spectral_target']
     
         params = {**default_parameters, **attributes}
-        if 'spectralTarget' not in params.keys():
-            params['spectralTarget'] = np.exp(np.log(params['tolerance'])/params['targetSteps'])
+        if 'spectral_target' not in params.keys():
+            params['spectral_target'] = np.exp(np.log(params['tolerance'])/params['target_steps'])
     
         params = {k: v for k,v in params.items() if k in allowed_params}
     

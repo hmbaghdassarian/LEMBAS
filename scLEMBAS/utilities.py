@@ -21,6 +21,19 @@ def set_seeds(seed: int=888):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
+def set_cores(n_cores: int):
+    """Set environmental variables to ensure core usage is limited to n_cores
+
+    Parameters
+    ----------
+    n_cores : int
+        number of cores to use
+    """
+    os.environ["OMP_NUM_THREADS"] = str(n_cores)
+    os.environ["MKL_NUM_THREADS"] = str(n_cores)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(n_cores)
+    os.environ["VECLIB_MAXIMUM_THREADS"] = str(n_cores)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(n_cores)
 
 def get_lr(iter: int, max_iter: int, max_height: float = 1e-3, 
              start_height: float=1e-5, end_height: float=1e-5, 
