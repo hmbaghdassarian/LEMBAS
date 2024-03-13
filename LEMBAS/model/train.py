@@ -10,10 +10,6 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
-sclembas_path = '/home/hmbaghda/Projects/LEMBAS'
-import sys
-import os
-sys.path.insert(1, os.path.join(sclembas_path))
 import LEMBAS.utilities as utils
 
 LR_PARAMS = {'max_iter': 5000, 'learning_rate': 2e-3}

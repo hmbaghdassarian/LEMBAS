@@ -579,13 +579,10 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 
 <span class="kn">import</span> <span class="nn">plotnine</span> <span class="k">as</span> <span class="nn">p9</span>
 
-<span class="n">sclembas_path</span> <span class="o">=</span> <span class="s1">'/home/hmbaghda/Projects/LEMBAS'</span>
-<span class="kn">import</span> <span class="nn">sys</span>
-<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sclembas_path</span><span class="p">))</span>
-<span class="kn">from</span> <span class="nn">scLEMBAS.model.bionetwork</span> <span class="kn">import</span> <span class="n">format_network</span><span class="p">,</span> <span class="n">SignalingModel</span>
-<span class="kn">from</span> <span class="nn">scLEMBAS.model.train</span> <span class="kn">import</span> <span class="n">train_signaling_model</span>
-<span class="kn">import</span> <span class="nn">scLEMBAS.utilities</span> <span class="k">as</span> <span class="nn">utils</span>
-<span class="kn">from</span> <span class="nn">scLEMBAS</span> <span class="kn">import</span> <span class="n">plotting</span><span class="p">,</span> <span class="n">io</span>
+<span class="kn">from</span> <span class="nn">LEMBAS.model.bionetwork</span> <span class="kn">import</span> <span class="n">format_network</span><span class="p">,</span> <span class="n">SignalingModel</span>
+<span class="kn">from</span> <span class="nn">LEMBAS.model.train</span> <span class="kn">import</span> <span class="n">train_signaling_model</span>
+<span class="kn">import</span> <span class="nn">LEMBAS.utilities</span> <span class="k">as</span> <span class="nn">utils</span>
+<span class="kn">from</span> <span class="nn">LEMBAS</span> <span class="kn">import</span> <span class="n">plotting</span><span class="p">,</span> <span class="n">io</span>
 </pre></div>
 <div class="clipboard-copy-txt" id="cell-1">import os
 
@@ -597,13 +594,10 @@ import torch
 
 import plotnine as p9
 
-sclembas_path = '/home/hmbaghda/Projects/LEMBAS'
-import sys
-sys.path.insert(1, os.path.join(sclembas_path))
-from scLEMBAS.model.bionetwork import format_network, SignalingModel
-from scLEMBAS.model.train import train_signaling_model
-import scLEMBAS.utilities as utils
-from scLEMBAS import plotting, io</div>
+from LEMBAS.model.bionetwork import format_network, SignalingModel
+from LEMBAS.model.train import train_signaling_model
+import LEMBAS.utilities as utils
+from LEMBAS import plotting, io</div>
 </div>
 </div>
 </div>
@@ -615,7 +609,7 @@ from scLEMBAS import plotting, io</div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>/tmp/ipykernel_3320260/2876216984.py:4: DeprecationWarning: 
+<pre>/tmp/ipykernel_1108639/3121986289.py:4: DeprecationWarning: 
 Pyarrow will become a required dependency of pandas in the next major release of pandas (pandas 3.0),
 (to allow more performant data types, such as the Arrow string type, and better interoperability with other libraries)
 but was not found to be installed on your system.
@@ -658,7 +652,9 @@ please provide us feedback at https://github.com/pandas-dev/pandas/issues/54466
     <span class="n">utils</span><span class="o">.</span><span class="n">set_seeds</span><span class="p">(</span><span class="n">seed</span> <span class="o">=</span> <span class="n">seed</span><span class="p">)</span>
 
 <span class="n">device</span> <span class="o">=</span> <span class="s2">"cuda"</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">"cpu"</span>
-<span class="n">data_path</span> <span class="o">=</span> <span class="s1">'./macrophage_data'</span>
+<span class="n">data_path</span> <span class="o">=</span> <span class="s1">'../macrophage_data'</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">data_path</span><span class="p">):</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">data_path</span><span class="p">)</span>
 </pre></div>
 <div class="clipboard-copy-txt" id="cell-2">n_cores = 12
 utils.set_cores(n_cores)
@@ -670,7 +666,9 @@ if seed:
     utils.set_seeds(seed = seed)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-data_path = './macrophage_data'</div>
+data_path = '../macrophage_data'
+if not os.path.isdir(data_path):
+    os.mkdir(data_path)</div>
 </div>
 </div>
 </div>
@@ -718,18 +716,18 @@ data_path = './macrophage_data'</div>
 </clipboard-copy>
 </div>
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="c1"># prior knowledge signaling network</span>
-<span class="n">net</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">data_path</span><span class="p">,</span> <span class="s1">'macrophage-Model.tsv'</span><span class="p">),</span> <span class="n">sep</span> <span class="o">=</span> <span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">index_col</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span>
+<span class="n">net</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s1">'https://zenodo.org/records/10815391/files/macrophage_network.tsv'</span><span class="p">,</span> <span class="n">sep</span> <span class="o">=</span> <span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">index_col</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span>
 
 <span class="c1"># ligand input and TF output</span>
-<span class="n">ligand_input</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">data_path</span><span class="p">,</span> <span class="s1">'macrophage-Ligands.tsv'</span><span class="p">),</span> <span class="n">sep</span><span class="o">=</span><span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<span class="n">tf_output</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">data_path</span><span class="p">,</span> <span class="s1">'macrophage-TFs.tsv'</span><span class="p">),</span> <span class="n">sep</span><span class="o">=</span><span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">ligand_input</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s1">'https://zenodo.org/records/10815391/files/macrophage_ligands.tsv'</span><span class="p">,</span> <span class="n">sep</span> <span class="o">=</span> <span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">index_col</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span>
+<span class="n">tf_output</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s1">'https://zenodo.org/records/10815391/files/macrophage_TFs.tsv'</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s1">'</span><span class="se">\t</span><span class="s1">'</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 </pre></div>
 <div class="clipboard-copy-txt" id="cell-3"># prior knowledge signaling network
-net = pd.read_csv(os.path.join(data_path, 'macrophage-Model.tsv'), sep = '\t', index_col = False)
+net = pd.read_csv('https://zenodo.org/records/10815391/files/macrophage_network.tsv', sep = '\t', index_col = False)
 
 # ligand input and TF output
-ligand_input = pd.read_csv(os.path.join(data_path, 'macrophage-Ligands.tsv'), sep='\t', low_memory=False, index_col=0)
-tf_output = pd.read_csv(os.path.join(data_path, 'macrophage-TFs.tsv'), sep='\t', low_memory=False, index_col=0)</div>
+ligand_input = pd.read_csv('https://zenodo.org/records/10815391/files/macrophage_ligands.tsv', sep = '\t', index_col = 0)
+tf_output = pd.read_csv('https://zenodo.org/records/10815391/files/macrophage_TFs.tsv', sep='\t', low_memory=False, index_col=0)</div>
 </div>
 </div>
 </div>
@@ -1616,7 +1614,7 @@ i=4000, l=0.00410, s=0.857, r=0.00019, v=1
 i=4250, l=0.00398, s=0.872, r=0.00009, v=0
 i=4500, l=0.00323, s=0.874, r=0.00002, v=0
 i=4750, l=0.00369, s=0.873, r=0.00000, v=0
-Training ran in: 27 min 42.09 sec
+Training ran in: 28 min 17.74 sec
 </pre>
 </div>
 </div>
