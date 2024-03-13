@@ -1,3 +1,7 @@
+"""
+Defines various activations functions to be used in neural net.
+"""
+
 import numpy as np
 import torch
 
