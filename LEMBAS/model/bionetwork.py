@@ -15,10 +15,10 @@ import torch
 import torch.nn as nn
 
 import sys
-sys.path.insert(1, "/home/hmbaghda/Projects/scLEMBAS/")
-from scLEMBAS.model.model_utilities import np_to_torch, format_network
-from scLEMBAS.model.activation_functions import activation_function_map
-from scLEMBAS.utilities import set_seeds
+sys.path.insert(1, "/home/hmbaghda/Projects/LEMBAS/")
+from LEMBAS.model.model_utilities import np_to_torch, format_network
+from LEMBAS.model.activation_functions import activation_function_map
+from LEMBAS.utilities import set_seeds
 
 class ProjectInput(nn.Module):
     """Generate all nodes for the signaling network and linearly scale input ligand values by NN parameters."""

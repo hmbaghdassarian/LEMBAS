@@ -30,5 +30,6 @@ dependencies:
     #     - mkdocstrings
     #     - mkdocstrings-python
     #     - mkdocs-material
+    #     - mkdocs-jupyter # for jupyter notebooks
     #     - pytkdocs[numpy-style]
     

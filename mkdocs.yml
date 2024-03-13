@@ -17,6 +17,7 @@ plugins:
             show_source: true
           options:
             show_submodules: true
+  - mkdocs-jupyter
 
 markdown_extensions:
   - pymdownx.highlight
@@ -24,4 +25,5 @@ markdown_extensions:
 
 nav:
   - "Home": index.md
+  - "Tutorial": macrophage_example.ipynb
   - "API": api.md
