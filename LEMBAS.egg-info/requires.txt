@@ -1,0 +1,10 @@
+pandas
+scikit-learn
+plotnine
+leidenalg
+torch>=2.1.0
+annotated-types
+
+[interactive]
+jupyter
+ipykerne

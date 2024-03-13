@@ -25,6 +25,7 @@ dependencies:
 
 # developer
     # - conda-forge::pygments
+    # - conda-forge::wheel
     # - pip:
     #     - mkdocs
     #     - mkdocstrings
@@ -32,4 +33,5 @@ dependencies:
     #     - mkdocs-material
     #     - mkdocs-jupyter # for jupyter notebooks
     #     - pytkdocs[numpy-style]
+    
     

@@ -33,6 +33,7 @@ INSTALL_REQUIRES = [
     'plotnine', # 0.13.1
     'leidenalg', # 0.10.2
     'torch>=2.1.0',
+    'annotated-types'
 ]
 
 EXTRAS_REQUIRES = {'interactive': ['jupyter', 'ipykerne']
