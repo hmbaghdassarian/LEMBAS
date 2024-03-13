@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <link rel="shortcut icon" href="../img/favicon.ico" />
-    <title>Build the Model - LEMBAS</title>
+    <title>Tutorial - LEMBAS</title>
     <link rel="stylesheet" href="../css/theme.css" />
     <link rel="stylesheet" href="../css/theme_extra.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
@@ -13,7 +13,7 @@
     
       <script>
         // Current page data
-        var mkdocs_page_name = "Build the Model";
+        var mkdocs_page_name = "Tutorial";
         var mkdocs_page_input_path = "macrophage_example.ipynb";
         var mkdocs_page_url = null;
       </script>
@@ -45,9 +45,23 @@
                 </li>
               </ul>
               <ul class="current">
-                <li class="toctree-l1 current"><a class="reference internal current" href="./">Build the Model</a>
+                <li class="toctree-l1 current"><a class="reference internal current" href="./">Tutorial</a>
     <ul class="current">
-    <li class="toctree-l2"><a class="reference internal" href="#load-input-data">Load Input Data</a>
+    <li class="toctree-l2"><a class="reference internal" href="#build-the-model">Build the Model</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#load-input-data">Load Input Data</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#define-parameters-to-build-and-train-model">Define Parameters to Build and Train Model</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#initialize-model">Initialize Model</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#train-model">Train Model</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#predict-using-the-model">Predict using the model:</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#visualize">Visualize</a>
     </li>
     </ul>
                 </li>
@@ -70,7 +84,7 @@
         <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
   <ul class="wy-breadcrumbs">
     <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
-      <li class="breadcrumb-item active">Build the Model</li>
+      <li class="breadcrumb-item active">Tutorial</li>
     <li class="wy-breadcrumbs-aside">
           <a href="https://github.com/hmbaghdassarian/LEMBAS/edit/master/docs/macrophage_example.ipynb">Edit on hmbaghdassarian/LEMBAS</a>
     </li>
@@ -515,13 +529,24 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </style>
 <!-- End of mermaid configuration --><div class="jupyter-wrapper">
 <div class="jp-Notebook" data-jp-theme-light="true" data-jp-theme-name="JupyterLab Light">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=3f394f29-0c13-4eca-b183-af19fcf59f6b">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h1 id="tutorial">Tutorial<a class="anchor-link" href="#tutorial">¶</a></h1>
+</div>
+</div>
+</div>
+</div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=05080d94-f8a1-4508-9947-5589e7528788">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>Example of running the LEMBAS model on macrophage data.</p>
+<p>Example of running the LEMBAS model on toy macrophage data.</p>
 </div>
 </div>
 </div>
@@ -554,7 +579,7 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 
 <span class="kn">import</span> <span class="nn">plotnine</span> <span class="k">as</span> <span class="nn">p9</span>
 
-<span class="n">sclembas_path</span> <span class="o">=</span> <span class="s1">'/home/hmbaghda/Projects/scLEMBAS'</span>
+<span class="n">sclembas_path</span> <span class="o">=</span> <span class="s1">'/home/hmbaghda/Projects/LEMBAS'</span>
 <span class="kn">import</span> <span class="nn">sys</span>
 <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sclembas_path</span><span class="p">))</span>
 <span class="kn">from</span> <span class="nn">scLEMBAS.model.bionetwork</span> <span class="kn">import</span> <span class="n">format_network</span><span class="p">,</span> <span class="n">SignalingModel</span>
@@ -572,7 +597,7 @@ import torch
 
 import plotnine as p9
 
-sclembas_path = '/home/hmbaghda/Projects/scLEMBAS'
+sclembas_path = '/home/hmbaghda/Projects/LEMBAS'
 import sys
 sys.path.insert(1, os.path.join(sclembas_path))
 from scLEMBAS.model.bionetwork import format_network, SignalingModel
@@ -658,7 +683,7 @@ data_path = './macrophage_data'</div>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="build-the-model">Build the Model<a class="anchor-link" href="#build-the-model">¶</a></h1>
+<h2 id="build-the-model">Build the Model<a class="anchor-link" href="#build-the-model">¶</a></h2>
 </div>
 </div>
 </div>
@@ -669,7 +694,7 @@ data_path = './macrophage_data'</div>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="load-input-data">Load Input Data<a class="anchor-link" href="#load-input-data">¶</a></h2>
+<h3 id="load-input-data">Load Input Data<a class="anchor-link" href="#load-input-data">¶</a></h3>
 </div>
 </div>
 </div>
@@ -961,7 +986,7 @@ net[[source_label, target_label, weight_label, stimulation_label, inhibition_lab
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="define-parameters-to-build-and-train-model">Define Parameters to Build and Train Model<a class="anchor-link" href="#define-parameters-to-build-and-train-model">¶</a></h1>
+<h3 id="define-parameters-to-build-and-train-model">Define Parameters to Build and Train Model<a class="anchor-link" href="#define-parameters-to-build-and-train-model">¶</a></h3>
 </div>
 </div>
 </div>
@@ -1027,7 +1052,7 @@ hyper_params = {**lr_params, **other_params, **regularization_params, **spectral
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="initialize-model">Initialize Model<a class="anchor-link" href="#initialize-model">¶</a></h2><p>Next, let's initialize the model and format the inputs/outputs for running the model:</p>
+<h3 id="initialize-model">Initialize Model<a class="anchor-link" href="#initialize-model">¶</a></h3><p>Next, let's initialize the model and format the inputs/outputs for running the model:</p>
 </div>
 </div>
 </div>
@@ -1496,7 +1521,7 @@ hyper_params = {**lr_params, **other_params, **regularization_params, **spectral
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="train-model">Train Model<a class="anchor-link" href="#train-model">¶</a></h2>
+<h3 id="train-model">Train Model<a class="anchor-link" href="#train-model">¶</a></h3>
 </div>
 </div>
 </div>
@@ -1605,7 +1630,7 @@ Training ran in: 27 min 42.09 sec
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="predict-using-the-model">Predict using the model:<a class="anchor-link" href="#predict-using-the-model">¶</a></h1>
+<h2 id="predict-using-the-model">Predict using the model:<a class="anchor-link" href="#predict-using-the-model">¶</a></h2>
 </div>
 </div>
 </div>
@@ -1674,7 +1699,7 @@ Y_hat, Y_full = mod(X_test)</div>
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="visualize">Visualize<a class="anchor-link" href="#visualize">¶</a></h1>
+<h2 id="visualize">Visualize<a class="anchor-link" href="#visualize">¶</a></h2>
 </div>
 </div>
 </div>
