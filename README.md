@@ -7,5 +7,5 @@ This is a re-implementation of LEMBAS. See the [github](https://github.com/Lauff
 Pull LEMBAS from [PyPI](https://pypi.org/project/LEMBAS-re/) (consider using pip3 to access Python 3):
 
 ```
-pip install LEMBAS_re
+pip install LEMBAS-re
 ```
