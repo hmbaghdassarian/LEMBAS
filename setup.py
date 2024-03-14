@@ -4,17 +4,19 @@ from setuptools import setup
 from setuptools import find_packages
 
 
-CLASSIFIERS = '''\
-License :: OSI Approved :: MIT license
-Programming Language :: Python :: 3.6 :: 3.11
-Topic :: Genome-Scale Modeling
-Operating System :: Microsoft :: Windows
-Operating System :: POSIX
-Operating System :: Unix
-Operating System :: MacOS
-'''
+classes = """
+    License :: OSI Approved :: MIT License
+    Programming Language :: Python :: 3
+    Topic :: Software Development :: Libraries
+    Topic :: Scientific/Engineering
+    Topic :: Scientific/Engineering :: Bio-Informatics
+    Operating System :: Microsoft :: Windows
+    Operating System :: Unix
+    Operating System :: POSIX
+    Operating System :: MacOS :: MacOS X
+"""
+classifiers = [s.strip() for s in classes.split('\n') if s]
 
-DISTNAME = 'LEMBAS'
 AUTHOR = 'Hratch Baghdassarian'
 AUTHOR_EMAIL = 'hmbaghdassarian@gmail.com'
 DESCRIPTION = 'Re-implementation of LEMBAS (https://github.com/Lauffenburger-Lab/LEMBAS)'
@@ -47,7 +49,7 @@ with open('README.md') as f:
     long_description = f.read()
 
 metadata = dict(
-    name=DISTNAME,
+    name='LEMBAS_re',
     version=VERSION,
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
@@ -60,7 +62,7 @@ metadata = dict(
     # python_requires=PYTHON_REQUIRES,
     install_requires=INSTALL_REQUIRES,
     extras_require=EXTRAS_REQUIRES,
-    classifiers=[CLASSIFIERS],
+    classifiers=classifiers,
     license=LICENSE
 )
 

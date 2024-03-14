@@ -1,5 +1,5 @@
 Metadata-Version: 2.1
-Name: LEMBAS
+Name: LEMBAS_re
 Version: 0.1.0
 Summary: Re-implementation of LEMBAS (https://github.com/Lauffenburger-Lab/LEMBAS)
 Home-page: https://github.com/hmbaghdassarian/LEMBAS
@@ -7,16 +7,17 @@ Author: Hratch Baghdassarian
 Author-email: hmbaghdassarian@gmail.com
 License: MIT
 Project-URL: Documentation, https://hmbaghdassarian.github.io/LEMBAS/
-Classifier: License :: OSI Approved :: MIT license
-Programming Language :: Python :: 3.6 :: 3.11
-Topic :: Genome-Scale Modeling
-Operating System :: Microsoft :: Windows
-Operating System :: POSIX
-Operating System :: Unix
-Operating System :: MacOS
-
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Scientific/Engineering
+Classifier: Topic :: Scientific/Engineering :: Bio-Informatics
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: Unix
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: MacOS :: MacOS X
 Description-Content-Type: text/markdown
-License-File: LICENSE
+License-File: LICENSE.txt
 Requires-Dist: pandas
 Requires-Dist: scikit-learn
 Requires-Dist: plotnine
@@ -30,3 +31,11 @@ Requires-Dist: ipykerne; extra == "interactive"
 # LEMBAS
 
 This is a re-implementation of LEMBAS. See the [github](https://github.com/Lauffenburger-Lab/LEMBAS) and associated [manuscript](https://doi.org/10.1038/s41467-022-30684-y) for details. See the [Documentation](https://hmbaghdassarian.github.io/LEMBAS/) and [tutorial](https://hmbaghdassarian.github.io/LEMBAS/macrophage_example/) for implementation.
+
+## Installation instructions
+
+Pull LEMBAS from [PyPI]() (consider using pip3 to access Python 3):
+
+```
+pip install LEMBAS_re
+```
